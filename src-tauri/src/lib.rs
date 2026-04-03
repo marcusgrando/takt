@@ -1,3 +1,6 @@
+mod models;
+mod db;
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
