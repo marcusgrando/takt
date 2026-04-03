@@ -1,3 +1,4 @@
+mod commands;
 mod db;
 mod executor;
 mod models;
@@ -63,7 +64,15 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![
+            commands::list_tasks,
+            commands::get_task,
+            commands::create_task,
+            commands::update_task,
+            commands::delete_task,
+            commands::run_task_now,
+            commands::list_logs,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
