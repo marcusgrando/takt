@@ -37,9 +37,10 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
   const [isToggling, setIsToggling] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
+  const [opError, setOpError] = useState<string | null>(null);
 
   async function handleToggle(checked: boolean) {
+    if (isToggling) return;
     // Optimistic update
     queryClient.setQueryData<TaskDto[]>(['tasks'], (prev) =>
       prev?.map((t) => t.id === task.id ? { ...t, enabled: checked } : t) ?? []
@@ -53,7 +54,7 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
       queryClient.setQueryData<TaskDto[]>(['tasks'], (prev) =>
         prev?.map((t) => t.id === task.id ? { ...t, enabled: task.enabled } : t) ?? []
       );
-      setRunError(err instanceof Error ? err.message : String(err));
+      setOpError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsToggling(false);
     }
@@ -61,12 +62,12 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
 
   async function handleRun() {
     if (isRunning) return;
-    setRunError(null);
+    setOpError(null);
     setIsRunning(true);
     try {
       await runTaskNow(task.id);
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : String(err));
+      setOpError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsRunning(false);
     }
@@ -80,7 +81,7 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
       setIsDeleting(false);
       onDeleted();
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : String(err));
+      setOpError(err instanceof Error ? err.message : String(err));
       setIsDeleting(false);
     }
   }
@@ -183,11 +184,11 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
       )}
 
       {/* Inline error message */}
-      {runError && (
+      {opError && (
         <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-destructive">
-          <span className="truncate">{runError}</span>
+          <span className="truncate">{opError}</span>
           <button
-            onClick={() => setRunError(null)}
+            onClick={() => setOpError(null)}
             className="ml-1 shrink-0 opacity-60 hover:opacity-100"
             aria-label="Dismiss error"
           >
