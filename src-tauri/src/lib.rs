@@ -1,13 +1,23 @@
-mod models;
 mod db;
 mod executor;
+mod models;
+mod scheduler;
 mod store;
 
+use std::sync::Arc;
+
+use crate::scheduler::AppScheduler;
+use crate::store::TaskStore;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
+
+pub struct AppState {
+    pub store: Arc<TaskStore>,
+    pub scheduler: Arc<AppScheduler>,
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -31,6 +41,26 @@ pub fn run() {
                     .build()?;
 
             setup_tray(app.handle())?;
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let pool = crate::db::connect()
+                    .await
+                    .expect("DB connect failed");
+                let store = Arc::new(TaskStore::new(pool));
+                let scheduler = Arc::new(
+                    AppScheduler::new(Arc::clone(&store))
+                        .await
+                        .expect("Scheduler init failed"),
+                );
+                scheduler.start().await.expect("Scheduler start failed");
+                scheduler
+                    .load_all_tasks()
+                    .await
+                    .expect("Load tasks failed");
+                handle.manage(AppState { store, scheduler });
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![])
