@@ -41,10 +41,10 @@ export default function App() {
         )}
         {view === 'history' && (
           <div className="p-4">
-            <p className="text-sm text-muted-foreground">History (coming soon)</p>
-            <button onClick={() => setView('list')} className="mt-2 text-sm underline">
-              Back
+            <button onClick={() => setView('list')} className="text-xs text-muted-foreground hover:text-foreground mb-2">
+              ← Back
             </button>
+            <p className="text-sm text-muted-foreground">History (coming soon)</p>
           </div>
         )}
       </div>

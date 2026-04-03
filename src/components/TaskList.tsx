@@ -14,6 +14,7 @@ export default function TaskList({ onEdit, onAdd }: TaskListProps) {
   const { data: tasks, isLoading, error, refetch } = useQuery({
     queryKey: ['tasks'],
     queryFn: listTasks,
+    staleTime: 30_000,
   });
 
   if (isLoading) {
