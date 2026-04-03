@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "cronmac",
   "version": "0.1.0",
-  "identifier": "com.marcusgrando.tauri-app",
+  "identifier": "com.marcusgrando.cronmac",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -10,13 +10,11 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "tauri-app",
-        "width": 800,
-        "height": 600
-      }
-    ],
+    "windows": [],
+    "trayIcon": {
+      "iconPath": "icons/tray-icon.png",
+      "iconAsTemplate": true
+    },
     "security": {
       "csp": null
     }
@@ -30,6 +28,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
   }
 }
