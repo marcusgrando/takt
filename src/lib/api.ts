@@ -49,14 +49,26 @@ export interface ExecutionLog {
   error?: string;
 }
 
+// ── Internal helper ────────────────────────────────────────────────────────
+
+// Tauri invoke rejects with a string; normalize to Error so React Query
+// (and any other caller) always receives a proper Error object.
+async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : String(e));
+  }
+}
+
 // ── API functions ──────────────────────────────────────────────────────────
 
 export async function listTasks(): Promise<TaskDto[]> {
-  return invoke('list_tasks');
+  return tauriInvoke<TaskDto[]>('list_tasks');
 }
 
 export async function getTask(id: string): Promise<TaskDto | null> {
-  return invoke('get_task', { id });
+  return tauriInvoke<TaskDto | null>('get_task', { id });
 }
 
 export async function createTask(params: {
@@ -65,7 +77,7 @@ export async function createTask(params: {
   schedule: Schedule;
   action: Action;
 }): Promise<TaskDto> {
-  return invoke('create_task', params);
+  return tauriInvoke<TaskDto>('create_task', params);
 }
 
 export async function updateTask(params: {
@@ -76,23 +88,23 @@ export async function updateTask(params: {
   schedule?: Schedule;
   action?: Action;
 }): Promise<TaskDto> {
-  return invoke('update_task', params);
+  return tauriInvoke<TaskDto>('update_task', params);
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  return invoke('delete_task', { id });
+  return tauriInvoke<void>('delete_task', { id });
 }
 
 export async function runTaskNow(id: string): Promise<void> {
-  return invoke('run_task_now', { id });
+  return tauriInvoke<void>('run_task_now', { id });
 }
 
 export async function listLogs(params?: {
   taskId?: string;
   limit?: number;
 }): Promise<ExecutionLog[]> {
-  return invoke('list_logs', {
+  return tauriInvoke<ExecutionLog[]>('list_logs', {
     task_id: params?.taskId,
-    limit: params?.limit,
+    limit: params?.limit !== undefined ? Math.trunc(params.limit) : undefined,
   });
 }
