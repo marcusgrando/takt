@@ -1,51 +1,63 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useState } from 'react';
+import TaskList from './components/TaskList';
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+type View = 'list' | 'add' | 'edit' | 'history';
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+export default function App() {
+  const [view, setView] = useState<View>('list');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="flex flex-col h-screen w-full bg-background text-foreground select-none">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 h-10 border-b shrink-0">
+        <span className="text-sm font-semibold">cronmac</span>
+        <button
+          onClick={() => setView('add')}
+          className="text-muted-foreground hover:text-foreground text-lg leading-none"
+          title="Add task"
+        >
+          +
+        </button>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      {/* Main content */}
+      <div className="flex-1 overflow-hidden">
+        {view === 'list' && (
+          <TaskList
+            onEdit={(id) => { setEditingId(id); setView('edit'); }}
+            onAdd={() => setView('add')}
+          />
+        )}
+        {(view === 'add' || view === 'edit') && (
+          <div className="p-4">
+            <p className="text-sm text-muted-foreground">
+              {view === 'add' ? 'Create task (coming soon)' : `Edit task ${editingId}`}
+            </p>
+            <button onClick={() => setView('list')} className="mt-2 text-sm underline">
+              Back
+            </button>
+          </div>
+        )}
+        {view === 'history' && (
+          <div className="p-4">
+            <p className="text-sm text-muted-foreground">History (coming soon)</p>
+            <button onClick={() => setView('list')} className="mt-2 text-sm underline">
+              Back
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-end px-3 h-8 border-t shrink-0">
+        <button
+          onClick={() => setView('history')}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          History
+        </button>
+      </div>
+    </div>
   );
 }
-
-export default App;
