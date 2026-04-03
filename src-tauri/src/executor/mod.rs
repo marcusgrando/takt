@@ -39,4 +39,5 @@ pub fn current_executor() -> Box<dyn ActionExecutor> {
     panic!("No executor available for this platform");
 }
 
+#[cfg(test)]
 mod tests;

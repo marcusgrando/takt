@@ -81,14 +81,16 @@ fn run_command(
         .arg(&full_command)
         .output()?;
 
-    Ok(ExecutionResult {
-        stdout: Some(String::from_utf8_lossy(&output.stdout).to_string()),
-        stderr: if output.stderr.is_empty() {
-            None
-        } else {
-            Some(String::from_utf8_lossy(&output.stderr).to_string())
-        },
-    })
+    let stdout = if output.stdout.is_empty() { None } else { Some(String::from_utf8_lossy(&output.stdout).to_string()) };
+    let stderr = if output.stderr.is_empty() { None } else { Some(String::from_utf8_lossy(&output.stderr).to_string()) };
+
+    if output.status.success() {
+        Ok(ExecutionResult { stdout, stderr })
+    } else {
+        Err(ExecutorError::CommandFailed(
+            format!("Exit code {}: {}", output.status.code().unwrap_or(-1), stderr.as_deref().unwrap_or(""))
+        ))
+    }
 }
 
 fn send_notification(title: &str, body: &str) -> Result<ExecutionResult, ExecutorError> {
