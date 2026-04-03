@@ -1,5 +1,6 @@
 mod models;
 mod db;
+mod executor;
 
 use tauri::{
     menu::{Menu, MenuItem},
