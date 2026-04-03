@@ -7,6 +7,7 @@ mod store;
 
 use std::sync::Arc;
 
+use crate::executor::{current_executor, ActionExecutor};
 use crate::scheduler::AppScheduler;
 use crate::store::TaskStore;
 use tauri::{
@@ -18,6 +19,7 @@ use tauri::{
 pub struct AppState {
     pub store: Arc<TaskStore>,
     pub scheduler: Arc<AppScheduler>,
+    pub executor: Arc<Box<dyn ActionExecutor>>,
 }
 
 pub fn run() {
@@ -41,14 +43,15 @@ pub fn run() {
                     .skip_taskbar(true)
                     .build()?;
 
-            setup_tray(app.handle())?;
-
+            // Block on async init so AppState is managed before setup() returns.
+            // This guarantees IPC handlers cannot be invoked before state is ready.
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
+            tauri::async_runtime::block_on(async move {
                 let pool = crate::db::connect()
                     .await
                     .expect("DB connect failed");
                 let store = Arc::new(TaskStore::new(pool));
+                let executor = Arc::new(current_executor());
                 let scheduler = Arc::new(
                     AppScheduler::new(Arc::clone(&store))
                         .await
@@ -59,8 +62,10 @@ pub fn run() {
                     .load_all_tasks()
                     .await
                     .expect("Load tasks failed");
-                handle.manage(AppState { store, scheduler });
+                handle.manage(AppState { store, scheduler, executor });
             });
+
+            setup_tray(app.handle())?;
 
             Ok(())
         })

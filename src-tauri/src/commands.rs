@@ -2,6 +2,9 @@ use crate::models::{Schedule, Action, TaskDto, ExecutionLog};
 use crate::AppState;
 use tauri::State;
 
+const STATUS_SUCCESS: &str = "success";
+const STATUS_FAILURE: &str = "failure";
+
 #[tauri::command]
 pub async fn list_tasks(state: State<'_, AppState>) -> Result<Vec<TaskDto>, String> {
     state.store.list_tasks().await.map_err(|e| e.to_string())
@@ -22,7 +25,9 @@ pub async fn create_task(
 ) -> Result<TaskDto, String> {
     let task = state.store.create_task(name, description, schedule.clone(), action.clone())
         .await.map_err(|e| e.to_string())?;
-    state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;
+    if task.enabled {
+        state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;
+    }
     Ok(task)
 }
 
@@ -36,12 +41,21 @@ pub async fn update_task(
     action: Option<Action>,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    state.store.update_task(&id, name, description, enabled, schedule, action)
-        .await.map_err(|e| e.to_string())
+    let task = state.store.update_task(&id, name, description, enabled, schedule, action)
+        .await.map_err(|e| e.to_string())?;
+    // NOTE: remove_task is a no-op stub in v1; the old in-memory job keeps running
+    // until the next app restart. Full job tracking by UUID is planned for v2.
+    state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
+    if task.enabled {
+        state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;
+    }
+    Ok(task)
 }
 
 #[tauri::command]
 pub async fn delete_task(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    // NOTE: remove_task is a no-op stub in v1. The in-memory cron job will keep
+    // firing until the next app restart. Full removal by job UUID is planned for v2.
     state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
     state.store.delete_task(&id).await.map_err(|e| e.to_string())
 }
@@ -50,11 +64,12 @@ pub async fn delete_task(id: String, state: State<'_, AppState>) -> Result<(), S
 pub async fn run_task_now(id: String, state: State<'_, AppState>) -> Result<(), String> {
     let task = state.store.get_task(&id).await.map_err(|e| e.to_string())?
         .ok_or_else(|| "Task not found".to_string())?;
-    let executor = crate::executor::current_executor();
-    let result = executor.execute(&task.action).await;
+    // NOTE: log_execution records Utc::now() internally for both started_at and
+    // finished_at; timing is approximate (does not capture true execution duration).
+    let result = state.executor.execute(&task.action).await;
     let (status, stdout, stderr, error) = match result {
-        Ok(r) => ("success", r.stdout, r.stderr, None),
-        Err(e) => ("failure", None, None, Some(e.to_string())),
+        Ok(r) => (STATUS_SUCCESS, r.stdout, r.stderr, None),
+        Err(e) => (STATUS_FAILURE, None, None, Some(e.to_string())),
     };
     state.store.log_execution(&id, status, stdout, stderr, error)
         .await.map_err(|e| e.to_string())?;
@@ -69,6 +84,6 @@ pub async fn list_logs(
     limit: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ExecutionLog>, String> {
-    state.store.list_logs(task_id.as_deref(), limit.unwrap_or(50))
+    state.store.list_logs(task_id.as_deref(), limit.unwrap_or(50).min(500))
         .await.map_err(|e| e.to_string())
 }
