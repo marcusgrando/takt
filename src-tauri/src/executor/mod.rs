@@ -16,6 +16,8 @@ pub enum ExecutorError {
     Http(String),
     #[error("Unsupported action on this platform: {0}")]
     Unsupported(String),
+    #[error("Accessibility permission required: {0}")]
+    AccessibilityRequired(String),
 }
 
 #[async_trait::async_trait]
@@ -28,12 +30,14 @@ pub trait ActionExecutor: Send + Sync {
 pub mod macos;
 
 #[cfg(target_os = "macos")]
+pub mod keymap;
+
+#[cfg(target_os = "macos")]
 pub use macos::MacosExecutor;
 
-/// Returns the correct executor for the current platform
-pub fn current_executor() -> Box<dyn ActionExecutor> {
+pub fn current_executor(app_handle: tauri::AppHandle) -> Box<dyn ActionExecutor> {
     #[cfg(target_os = "macos")]
-    return Box::new(MacosExecutor::new());
+    return Box::new(MacosExecutor::new(app_handle));
 
     #[cfg(not(target_os = "macos"))]
     panic!("No executor available for this platform");

@@ -35,4 +35,8 @@ dirs = "5"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSURL", "NSString", "NSArray", "NSObject", "NSRunLoop", "NSDate"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"] }
+core-graphics = "0.24"
 

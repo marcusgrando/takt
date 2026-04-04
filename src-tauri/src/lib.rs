@@ -64,9 +64,9 @@ pub fn run() {
                     .await
                     .expect("DB connect failed");
                 let store = Arc::new(TaskStore::new(pool));
-                let executor = Arc::new(current_executor());
+                let executor = Arc::new(current_executor(handle.clone()));
                 let scheduler = Arc::new(
-                    AppScheduler::new(Arc::clone(&store))
+                    AppScheduler::new(Arc::clone(&store), handle.clone())
                         .await
                         .expect("Scheduler init failed"),
                 );

@@ -22,9 +22,9 @@ pub struct AppScheduler {
 }
 
 impl AppScheduler {
-    pub async fn new(store: Arc<TaskStore>) -> anyhow::Result<Self> {
+    pub async fn new(store: Arc<TaskStore>, app_handle: tauri::AppHandle) -> anyhow::Result<Self> {
         let inner = JobScheduler::new().await?;
-        let executor = Arc::new(current_executor());
+        let executor = Arc::new(current_executor(app_handle));
         Ok(Self {
             inner,
             executor,

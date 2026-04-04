@@ -1,13 +1,22 @@
 use super::{ActionExecutor, ExecutionResult, ExecutorError};
-use crate::models::{Action, HttpMethod, Shell};
+use super::keymap::resolve_keycode;
+use crate::models::{Action, HttpMethod, KeyCombo, Modifier, Shell};
 use async_trait::async_trait;
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use objc2_app_kit::NSWorkspace;
+use objc2_foundation::{NSURL, NSString};
 use std::process::Command;
+use std::time::Duration;
+use tauri_plugin_notification::NotificationExt;
 
-pub struct MacosExecutor;
+pub struct MacosExecutor {
+    app_handle: tauri::AppHandle,
+}
 
 impl MacosExecutor {
-    pub fn new() -> Self {
-        MacosExecutor
+    pub fn new(app_handle: tauri::AppHandle) -> Self {
+        Self { app_handle }
     }
 }
 
@@ -19,11 +28,31 @@ impl ActionExecutor for MacosExecutor {
 
     async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError> {
         match action {
-            Action::OpenFile { path } => open_file(path),
-            Action::OpenUrl { url, browser } => open_url(url, browser.as_deref()),
+            Action::OpenFile { path, app, post_shortcuts } => {
+                open_with_command(path, app.as_deref(), false)?;
+                if !post_shortcuts.is_empty() {
+                    wait_and_send_shortcuts(post_shortcuts).await?;
+                }
+                Ok(ExecutionResult { stdout: None, stderr: None })
+            }
+            Action::OpenUrl { url, browser, post_shortcuts } => {
+                open_with_command(url, browser.as_deref(), false)?;
+                if !post_shortcuts.is_empty() {
+                    wait_and_send_shortcuts(post_shortcuts).await?;
+                }
+                Ok(ExecutionResult { stdout: None, stderr: None })
+            }
+            Action::OpenApp { app_path, post_shortcuts } => {
+                open_with_command(app_path, None, true)?;
+                if !post_shortcuts.is_empty() {
+                    wait_and_send_shortcuts(post_shortcuts).await?;
+                }
+                Ok(ExecutionResult { stdout: None, stderr: None })
+            }
             Action::RunCommand { command, args, shell } => run_command(command, args, shell),
-            Action::Notify { title, body, sound } => send_notification(title, body, *sound),
-            Action::Shortcut { keys } => send_shortcut(keys),
+            Action::Notify { title, body, sound } => {
+                send_notification(&self.app_handle, title, body, *sound)
+            }
             Action::Webhook { url, method, headers, body } => {
                 send_webhook(url, method, headers, body.as_deref()).await
             }
@@ -31,37 +60,108 @@ impl ActionExecutor for MacosExecutor {
     }
 }
 
-fn open_file(path: &str) -> Result<ExecutionResult, ExecutorError> {
-    let output = Command::new("open").arg(path).output()?;
-    if output.status.success() {
-        Ok(ExecutionResult { stdout: None, stderr: None })
+// ── Open via NSWorkspace ────────────────────────────────────────────
+
+fn open_with_command(target: &str, app: Option<&str>, is_app: bool) -> Result<(), ExecutorError> {
+    // Use NSWorkspace for opening - it's the native macOS way
+    let workspace = NSWorkspace::sharedWorkspace();
+
+    if is_app {
+        // Opening an application
+        let url = NSURL::fileURLWithPath(&NSString::from_str(target));
+        let opened = workspace.openURL(&url);
+        if !opened {
+            return Err(ExecutorError::CommandFailed(format!("Failed to open app: {}", target)));
+        }
+    } else if let Some(app_name) = app {
+        // Open file/URL with specific app - use `open -a` command as fallback
+        // NSWorkspace's openURLs:withApplicationAtURL: requires complex configuration
+        let mut cmd = Command::new("open");
+        cmd.arg("-a").arg(app_name).arg(target);
+        let output = cmd.output()?;
+        if !output.status.success() {
+            return Err(ExecutorError::CommandFailed(
+                String::from_utf8_lossy(&output.stderr).to_string()
+            ));
+        }
     } else {
-        Err(ExecutorError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
+        // Open with default handler
+        let url = if target.starts_with("http://") || target.starts_with("https://") {
+            NSURL::URLWithString(&NSString::from_str(target))
+                .ok_or_else(|| ExecutorError::CommandFailed(format!("Invalid URL: {}", target)))?
+        } else {
+            NSURL::fileURLWithPath(&NSString::from_str(target))
+        };
+        let opened = workspace.openURL(&url);
+        if !opened {
+            return Err(ExecutorError::CommandFailed(format!("Failed to open: {}", target)));
+        }
     }
+    Ok(())
 }
 
-fn open_url(url: &str, browser: Option<&str>) -> Result<ExecutionResult, ExecutorError> {
-    let mut cmd = Command::new("open");
-    if let Some(b) = browser {
-        cmd.arg("-a").arg(b);
+// ── Post-shortcuts: wait + CGEvent ────────────────────────────────────
+
+async fn wait_and_send_shortcuts(shortcuts: &[KeyCombo]) -> Result<(), ExecutorError> {
+    if !accessibility_is_trusted() {
+        return Err(ExecutorError::AccessibilityRequired(
+            "Grant Accessibility permission in System Settings → Privacy & Security → Accessibility".into()
+        ));
     }
-    let output = cmd.arg(url).output()?;
-    if output.status.success() {
-        Ok(ExecutionResult { stdout: None, stderr: None })
-    } else {
-        Err(ExecutorError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
+
+    // Wait for the target app to become frontmost
+    // NSWorkspace open is typically fast — app is frontmost within ~500ms
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    for combo in shortcuts {
+        send_key_combo(combo)?;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    Ok(())
 }
 
-fn run_command(
-    command: &str,
-    args: &[String],
-    shell: &Shell,
-) -> Result<ExecutionResult, ExecutorError> {
+fn send_key_combo(combo: &KeyCombo) -> Result<(), ExecutorError> {
+    let keycode = resolve_keycode(&combo.key)
+        .ok_or_else(|| ExecutorError::CommandFailed(format!("Unknown key: {}", combo.key)))?;
+
+    let mut flags = CGEventFlags::CGEventFlagNull;
+    for modifier in &combo.modifiers {
+        flags |= match modifier {
+            Modifier::Cmd => CGEventFlags::CGEventFlagCommand,
+            Modifier::Shift => CGEventFlags::CGEventFlagShift,
+            Modifier::Opt => CGEventFlags::CGEventFlagAlternate,
+            Modifier::Ctrl => CGEventFlags::CGEventFlagControl,
+        };
+    }
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| ExecutorError::CommandFailed("Failed to create CGEventSource".into()))?;
+
+    // Key down
+    let key_down = CGEvent::new_keyboard_event(source.clone(), keycode as CGKeyCode, true)
+        .map_err(|_| ExecutorError::CommandFailed("Failed to create key-down event".into()))?;
+    key_down.set_flags(flags);
+    key_down.post(CGEventTapLocation::HID);
+
+    // Key up
+    let key_up = CGEvent::new_keyboard_event(source, keycode as CGKeyCode, false)
+        .map_err(|_| ExecutorError::CommandFailed("Failed to create key-up event".into()))?;
+    key_up.set_flags(flags);
+    key_up.post(CGEventTapLocation::HID);
+
+    Ok(())
+}
+
+fn accessibility_is_trusted() -> bool {
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
+// ── RunCommand (unchanged — std::process::Command) ───────────────────
+
+fn run_command(command: &str, args: &[String], shell: &Shell) -> Result<ExecutionResult, ExecutorError> {
     let full_command = if args.is_empty() {
         command.to_string()
     } else {
@@ -76,11 +176,7 @@ fn run_command(
         Shell::AppleScript => ("/usr/bin/osascript", "-e"),
     };
 
-    let output = Command::new(shell_bin)
-        .arg(shell_flag)
-        .arg(&full_command)
-        .output()?;
-
+    let output = Command::new(shell_bin).arg(shell_flag).arg(&full_command).output()?;
     let stdout = if output.stdout.is_empty() { None } else { Some(String::from_utf8_lossy(&output.stdout).to_string()) };
     let stderr = if output.stderr.is_empty() { None } else { Some(String::from_utf8_lossy(&output.stderr).to_string()) };
 
@@ -93,57 +189,21 @@ fn run_command(
     }
 }
 
-fn send_notification(title: &str, body: &str, sound: bool) -> Result<ExecutionResult, ExecutorError> {
-    let sound_part = if sound { r#" sound name "default""# } else { "" };
-    let script = format!(
-        r#"display notification "{}" with title "{}"{}"#,
-        body.replace('"', r#"\""#),
-        title.replace('"', r#"\""#),
-        sound_part
-    );
-    let output = Command::new("osascript").arg("-e").arg(&script).output()?;
-    if output.status.success() {
-        Ok(ExecutionResult { stdout: None, stderr: None })
-    } else {
-        Err(ExecutorError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
+// ── Notification via tauri-plugin-notification ────────────────────────
+
+fn send_notification(app: &tauri::AppHandle, title: &str, body: &str, sound: bool) -> Result<ExecutionResult, ExecutorError> {
+    let mut builder = app.notification().builder()
+        .title(title)
+        .body(body);
+    if sound {
+        builder = builder.sound("default");
     }
+    builder.show()
+        .map_err(|e| ExecutorError::CommandFailed(format!("Notification failed: {}", e)))?;
+    Ok(ExecutionResult { stdout: None, stderr: None })
 }
 
-fn send_shortcut(keys: &[String]) -> Result<ExecutionResult, ExecutorError> {
-    let keystroke = keys.last().unwrap_or(&String::new()).clone();
-    let modifiers: Vec<&str> = keys[..keys.len().saturating_sub(1)]
-        .iter()
-        .filter_map(|k| match k.as_str() {
-            "cmd" | "command" => Some("command down"),
-            "shift" => Some("shift down"),
-            "opt" | "option" => Some("option down"),
-            "ctrl" | "control" => Some("control down"),
-            _ => None,
-        })
-        .collect();
-
-    let using_clause = if modifiers.is_empty() {
-        String::new()
-    } else {
-        format!(" using {{{}}}", modifiers.join(", "))
-    };
-
-    let script = format!(
-        r#"tell application "System Events" to keystroke "{}"{}"#,
-        keystroke, using_clause
-    );
-
-    let output = Command::new("osascript").arg("-e").arg(&script).output()?;
-    if output.status.success() {
-        Ok(ExecutionResult { stdout: None, stderr: None })
-    } else {
-        Err(ExecutorError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
-    }
-}
+// ── Webhook (unchanged — reqwest) ────────────────────────────────────
 
 async fn send_webhook(
     url: &str,
@@ -159,34 +219,19 @@ async fn send_webhook(
         HttpMethod::PATCH => client.patch(url),
         HttpMethod::DELETE => client.delete(url),
     };
-
     for (k, v) in headers {
         req = req.header(k, v);
     }
     if let Some(b) = body {
         req = req.body(b.to_string());
     }
-
-    let response = req
-        .send()
-        .await
-        .map_err(|e| ExecutorError::Http(e.to_string()))?;
-
+    let response = req.send().await.map_err(|e| ExecutorError::Http(e.to_string()))?;
     let status = response.status();
-    let response_body = response
-        .text()
-        .await
-        .map_err(|e| ExecutorError::Http(e.to_string()))?;
+    let response_body = response.text().await.map_err(|e| ExecutorError::Http(e.to_string()))?;
 
     if status.is_success() {
-        Ok(ExecutionResult {
-            stdout: Some(response_body),
-            stderr: None,
-        })
+        Ok(ExecutionResult { stdout: Some(response_body), stderr: None })
     } else {
-        Err(ExecutorError::CommandFailed(format!(
-            "HTTP {} — {}",
-            status, response_body
-        )))
+        Err(ExecutorError::CommandFailed(format!("HTTP {} — {}", status, response_body)))
     }
 }
