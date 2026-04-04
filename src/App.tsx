@@ -4,6 +4,7 @@ import { queryClient } from '@/lib';
 import { listTasks } from '@/lib/api';
 import TaskList from './components/TaskList';
 import TaskWizard from './components/TaskWizard';
+import HistoryView from './components/HistoryView';
 
 type View = 'list' | 'add' | 'edit' | 'history';
 
@@ -79,12 +80,7 @@ export default function App() {
         })()}
 
         {view === 'history' && (
-          <div className="p-4">
-            <button onClick={() => setView('list')} className="text-xs text-muted-foreground hover:text-foreground mb-2">
-              ← Back
-            </button>
-            <p className="text-sm text-muted-foreground">History (coming soon)</p>
-          </div>
+          <HistoryView onBack={() => setView('list')} />
         )}
       </div>
 
