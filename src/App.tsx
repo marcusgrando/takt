@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Clock } from 'lucide-react';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { invoke } from '@tauri-apps/api/core';
 import { queryClient } from '@/lib';
 import { Button } from '@/components/ui/button';
@@ -45,6 +45,17 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
 
 export default function App() {
   const [view, setView] = useState<View>('list');
+
+  // ESC hides the popover window
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        getCurrentWebviewWindow().hide();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   function handleTemplateSelect(template: TemplateName) {
     openEditorWindow({ template });
