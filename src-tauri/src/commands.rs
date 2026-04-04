@@ -1,6 +1,8 @@
 use crate::models::{Schedule, Action, TaskDto, ExecutionLog};
 use crate::AppState;
 use tauri::State;
+use objc2_app_kit::NSWorkspace;
+use objc2_foundation::{NSURL, NSString};
 
 const STATUS_SUCCESS: &str = "success";
 const STATUS_FAILURE: &str = "failure";
@@ -82,4 +84,30 @@ pub async fn list_logs(
 ) -> Result<Vec<ExecutionLog>, String> {
     state.store.list_logs(task_id.as_deref(), limit.unwrap_or(50).min(500))
         .await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_browsers() -> Vec<String> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let Some(https_url) = NSURL::URLWithString(&NSString::from_str("https://example.com")) else {
+        return vec![];
+    };
+    let app_urls = workspace.URLsForApplicationsToOpenURL(&https_url);
+    let mut browsers: Vec<String> = Vec::new();
+
+    for app_url in app_urls.to_vec() {
+        if let Some(path) = app_url.path() {
+            let path_str: String = path.to_string();
+            if let Some(name) = path_str.split('/').last() {
+                let clean = name.trim_end_matches(".app");
+                if !clean.is_empty() {
+                    browsers.push(clean.to_string());
+                }
+            }
+        }
+    }
+
+    browsers.sort();
+    browsers.dedup();
+    browsers
 }

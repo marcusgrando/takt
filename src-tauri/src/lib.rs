@@ -90,6 +90,7 @@ pub fn run() {
             commands::delete_task,
             commands::run_task_now,
             commands::list_logs,
+            commands::list_browsers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

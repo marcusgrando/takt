@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, X, FolderOpen } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { type Action, type Shell, type HttpMethod, type KeyCombo, type Modifier } from '@/lib/api';
+import { type Action, type Shell, type HttpMethod, type KeyCombo, type Modifier, listBrowsers } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -146,6 +146,12 @@ async function pickApp(): Promise<string | null> {
 }
 
 export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
+  const [browsers, setBrowsers] = useState<string[]>([]);
+
+  useEffect(() => {
+    listBrowsers().then(setBrowsers).catch(() => {});
+  }, []);
+
   function handleTypeChange(v: string) {
     onChange(defaultAction(v as Action['type']));
   }
@@ -217,7 +223,13 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
           </div>
           <div className="space-y-2">
             <Label>Browser <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Input value={value.browser ?? ''} onChange={(e) => onChange({ ...value, browser: e.target.value || undefined })} placeholder="Safari, Firefox, …" />
+            <Select value={value.browser ?? '__default__'} onValueChange={(v) => onChange({ ...value, browser: v === '__default__' ? undefined : v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">Default browser</SelectItem>
+                {browsers.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       )}

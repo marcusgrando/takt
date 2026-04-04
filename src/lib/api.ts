@@ -114,3 +114,7 @@ export async function listLogs(params?: {
     limit: params?.limit !== undefined ? Math.trunc(params.limit) : undefined,
   });
 }
+
+export async function listBrowsers(): Promise<string[]> {
+  return tauriInvoke<string[]>('list_browsers');
+}
