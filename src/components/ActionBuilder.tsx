@@ -1,9 +1,13 @@
-import { type Action, type Shell, type HttpMethod } from '@/lib/api';
+import { useState } from 'react';
+import { Plus, X, FolderOpen } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { type Action, type Shell, type HttpMethod, type KeyCombo, type Modifier } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface ActionBuilderProps {
@@ -12,16 +16,17 @@ interface ActionBuilderProps {
 }
 
 const ACTION_TYPES: { type: Action['type']; label: string }[] = [
-  { type: 'OpenFile', label: 'File' },
   { type: 'OpenUrl', label: 'URL' },
+  { type: 'OpenFile', label: 'File' },
+  { type: 'OpenApp', label: 'App' },
   { type: 'RunCommand', label: 'Cmd' },
   { type: 'Notify', label: 'Notify' },
-  { type: 'Shortcut', label: 'Keys' },
   { type: 'Webhook', label: 'Hook' },
 ];
 
 const SHELLS: Shell[] = ['Sh', 'Bash', 'Zsh', 'Python', 'AppleScript'];
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const MODIFIERS: Modifier[] = ['Cmd', 'Shift', 'Opt', 'Ctrl'];
 
 function headersToText(headers: Record<string, string>): string {
   return Object.entries(headers).map(([k, v]) => `${k}=${v}`).join('\n');
@@ -39,13 +44,105 @@ function textToHeaders(text: string): Record<string, string> {
 
 function defaultAction(type: Action['type']): Action {
   switch (type) {
-    case 'OpenFile': return { type: 'OpenFile', path: '' };
-    case 'OpenUrl': return { type: 'OpenUrl', url: '', browser: undefined };
+    case 'OpenFile': return { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [] };
+    case 'OpenUrl': return { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [] };
+    case 'OpenApp': return { type: 'OpenApp', app_path: '', post_shortcuts: [] };
     case 'RunCommand': return { type: 'RunCommand', command: '', args: [], shell: 'Zsh' };
-    case 'Notify': return { type: 'Notify', title: '', body: '', sound: false };
-    case 'Shortcut': return { type: 'Shortcut', keys: [] };
+    case 'Notify': return { type: 'Notify', title: '', body: '', sound: true };
     case 'Webhook': return { type: 'Webhook', url: '', method: 'GET', headers: {}, body: undefined };
   }
+}
+
+function PostShortcutsEditor({ shortcuts, onChange }: {
+  shortcuts: KeyCombo[];
+  onChange: (s: KeyCombo[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(shortcuts.length > 0);
+
+  function addCombo() {
+    onChange([...shortcuts, { modifiers: [], key: '' }]);
+    setExpanded(true);
+  }
+
+  function removeCombo(index: number) {
+    onChange(shortcuts.filter((_, i) => i !== index));
+  }
+
+  function updateCombo(index: number, combo: KeyCombo) {
+    onChange(shortcuts.map((c, i) => i === index ? combo : c));
+  }
+
+  function toggleModifier(index: number, mod: Modifier) {
+    const combo = shortcuts[index];
+    const has = combo.modifiers.includes(mod);
+    const newMods = has
+      ? combo.modifiers.filter((m) => m !== mod)
+      : [...combo.modifiers, mod];
+    updateCombo(index, { ...combo, modifiers: newMods });
+  }
+
+  if (!expanded && shortcuts.length === 0) {
+    return (
+      <button type="button" onClick={() => { addCombo(); }} className="text-sm text-primary hover:underline">
+        + Run shortcuts after open
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+        Shortcuts after open
+      </Label>
+      {shortcuts.map((combo, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {MODIFIERS.map((mod) => (
+              <button
+                key={mod}
+                type="button"
+                onClick={() => toggleModifier(i, mod)}
+                className={`px-2 py-1 text-xs rounded border transition-colors ${
+                  combo.modifiers.includes(mod)
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background border-border text-muted-foreground hover:border-primary/30'
+                }`}
+              >
+                {mod}
+              </button>
+            ))}
+          </div>
+          <Input
+            value={combo.key}
+            onChange={(e) => updateCombo(i, { ...combo, key: e.target.value })}
+            placeholder="key"
+            className="w-20 font-mono"
+          />
+          <Button variant="ghost" size="icon-sm" onClick={() => removeCombo(i)} className="text-muted-foreground hover:text-destructive">
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={addCombo} className="w-full">
+        <Plus className="size-3.5" />
+        Add shortcut
+      </Button>
+    </div>
+  );
+}
+
+async function pickFile(): Promise<string | null> {
+  const result = await open({ multiple: false, directory: false });
+  return result ?? null;
+}
+
+async function pickApp(): Promise<string | null> {
+  const result = await open({
+    multiple: false,
+    directory: false,
+    defaultPath: '/Applications',
+  });
+  return result ?? null;
 }
 
 export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
@@ -53,9 +150,15 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
     onChange(defaultAction(v as Action['type']));
   }
 
+  const hasPostShortcuts = value.type === 'OpenFile' || value.type === 'OpenUrl' || value.type === 'OpenApp';
+  const postShortcuts = hasPostShortcuts ? (value as { post_shortcuts: KeyCombo[] }).post_shortcuts : [];
+
+  function handleShortcutsChange(shortcuts: KeyCombo[]) {
+    onChange({ ...value, post_shortcuts: shortcuts } as Action);
+  }
+
   return (
     <div className="space-y-4">
-      {/* Action type — shadcn Tabs */}
       <Tabs value={value.type} onValueChange={handleTypeChange}>
         <TabsList className="w-full flex-wrap h-auto gap-0 p-1">
           {ACTION_TYPES.map(({ type, label }) => (
@@ -65,21 +168,76 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
       </Tabs>
 
       {value.type === 'OpenFile' && (
-        <div className="space-y-2">
-          <Label htmlFor="of-path">File path</Label>
-          <Input id="of-path" value={value.path} onChange={(e) => onChange({ ...value, path: e.target.value })} placeholder="/path/to/file" className="font-mono" />
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label>File path</Label>
+            <div className="flex gap-2">
+              <Input
+                value={value.path}
+                onChange={(e) => onChange({ ...value, path: e.target.value })}
+                placeholder="/path/to/file"
+                className="font-mono flex-1"
+              />
+              <Button variant="outline" size="sm" onClick={async () => {
+                const path = await pickFile();
+                if (path) onChange({ ...value, path });
+              }}>
+                <FolderOpen className="size-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Open with app <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <div className="flex gap-2">
+              <Input
+                value={value.app ?? ''}
+                onChange={(e) => onChange({ ...value, app: e.target.value || undefined })}
+                placeholder="Default app"
+                className="flex-1"
+              />
+              <Button variant="outline" size="sm" onClick={async () => {
+                const path = await pickApp();
+                if (path) {
+                  const name = path.split('/').pop()?.replace('.app', '') || path;
+                  onChange({ ...value, app: name });
+                }
+              }}>
+                <FolderOpen className="size-4" />
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
       {value.type === 'OpenUrl' && (
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="ou-url">URL</Label>
-            <Input id="ou-url" value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://example.com" />
+            <Label>URL</Label>
+            <Input value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://example.com" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="ou-browser">Browser <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Input id="ou-browser" value={value.browser ?? ''} onChange={(e) => onChange({ ...value, browser: e.target.value || undefined })} placeholder="Safari, Firefox, …" />
+            <Label>Browser <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input value={value.browser ?? ''} onChange={(e) => onChange({ ...value, browser: e.target.value || undefined })} placeholder="Safari, Firefox, …" />
+          </div>
+        </div>
+      )}
+
+      {value.type === 'OpenApp' && (
+        <div className="space-y-2">
+          <Label>Application</Label>
+          <div className="flex gap-2">
+            <Input
+              value={value.app_path}
+              onChange={(e) => onChange({ ...value, app_path: e.target.value })}
+              placeholder="/Applications/App.app"
+              className="font-mono flex-1"
+            />
+            <Button variant="outline" size="sm" onClick={async () => {
+              const path = await pickApp();
+              if (path) onChange({ ...value, app_path: path });
+            }}>
+              <FolderOpen className="size-4" />
+            </Button>
           </div>
         </div>
       )}
@@ -87,19 +245,19 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
       {value.type === 'RunCommand' && (
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="rc-shell">Shell</Label>
+            <Label>Shell</Label>
             <Select value={value.shell} onValueChange={(v) => onChange({ ...value, shell: v as Shell })}>
-              <SelectTrigger id="rc-shell"><SelectValue /></SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{SHELLS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="rc-cmd">Command</Label>
-            <Input id="rc-cmd" value={value.command} onChange={(e) => onChange({ ...value, command: e.target.value })} placeholder="echo hello" className="font-mono" />
+            <Label>Command</Label>
+            <Input value={value.command} onChange={(e) => onChange({ ...value, command: e.target.value })} placeholder="echo hello" className="font-mono" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="rc-args">Arguments <span className="text-muted-foreground font-normal">(one per line)</span></Label>
-            <Textarea id="rc-args" value={value.args.join('\n')} onChange={(e) => onChange({ ...value, args: e.target.value.split('\n').map((a) => a.trim()).filter(Boolean) })} placeholder={"--flag\nvalue"} className="font-mono resize-none" rows={3} />
+            <Label>Arguments <span className="text-muted-foreground font-normal">(one per line)</span></Label>
+            <Textarea value={value.args.join('\n')} onChange={(e) => onChange({ ...value, args: e.target.value.split('\n').map((a) => a.trim()).filter(Boolean) })} placeholder={"--flag\nvalue"} className="font-mono resize-none" rows={3} />
           </div>
         </div>
       )}
@@ -107,12 +265,12 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
       {value.type === 'Notify' && (
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="n-title">Title</Label>
-            <Input id="n-title" value={value.title} onChange={(e) => onChange({ ...value, title: e.target.value })} placeholder="Notification title" />
+            <Label>Title</Label>
+            <Input value={value.title} onChange={(e) => onChange({ ...value, title: e.target.value })} placeholder="Notification title" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="n-body">Body</Label>
-            <Textarea id="n-body" value={value.body} onChange={(e) => onChange({ ...value, body: e.target.value })} placeholder="Notification body" className="resize-none" rows={3} />
+            <Label>Body</Label>
+            <Textarea value={value.body} onChange={(e) => onChange({ ...value, body: e.target.value })} placeholder="Notification body" className="resize-none" rows={3} />
           </div>
           <div className="flex items-center gap-2">
             <Switch id="n-sound" checked={value.sound} onCheckedChange={(checked) => onChange({ ...value, sound: checked })} />
@@ -121,37 +279,37 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
         </div>
       )}
 
-      {value.type === 'Shortcut' && (
-        <div className="space-y-2">
-          <Label htmlFor="sc-keys">Keys <span className="text-muted-foreground font-normal">(comma-separated)</span></Label>
-          <Input id="sc-keys" value={value.keys.join(', ')} onChange={(e) => onChange({ ...value, keys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean) })} placeholder="cmd, shift, 4" className="font-mono" />
-        </div>
-      )}
-
       {value.type === 'Webhook' && (
         <div className="space-y-3">
           <div className="flex gap-2">
             <div className="space-y-2">
-              <Label htmlFor="wh-method">Method</Label>
+              <Label>Method</Label>
               <Select value={value.method} onValueChange={(v) => onChange({ ...value, method: v as HttpMethod })}>
-                <SelectTrigger id="wh-method" className="w-24"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
                 <SelectContent>{HTTP_METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-2 flex-1">
-              <Label htmlFor="wh-url">URL</Label>
-              <Input id="wh-url" value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://api.example.com/hook" />
+              <Label>URL</Label>
+              <Input value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://api.example.com/hook" />
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="wh-headers">Headers <span className="text-muted-foreground font-normal">(key=value per line)</span></Label>
-            <Textarea id="wh-headers" value={headersToText(value.headers)} onChange={(e) => onChange({ ...value, headers: textToHeaders(e.target.value) })} placeholder="Authorization=Bearer token" className="font-mono resize-none" rows={3} />
+            <Label>Headers <span className="text-muted-foreground font-normal">(key=value per line)</span></Label>
+            <Textarea value={headersToText(value.headers)} onChange={(e) => onChange({ ...value, headers: textToHeaders(e.target.value) })} placeholder="Authorization=Bearer token" className="font-mono resize-none" rows={3} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="wh-body">Body <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Textarea id="wh-body" value={value.body ?? ''} onChange={(e) => onChange({ ...value, body: e.target.value || undefined })} placeholder='{"key": "value"}' className="font-mono resize-none" rows={3} />
+            <Label>Body <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Textarea value={value.body ?? ''} onChange={(e) => onChange({ ...value, body: e.target.value || undefined })} placeholder='{"key": "value"}' className="font-mono resize-none" rows={3} />
           </div>
         </div>
+      )}
+
+      {hasPostShortcuts && (
+        <>
+          <div className="border-t border-border pt-4" />
+          <PostShortcutsEditor shortcuts={postShortcuts} onChange={handleShortcutsChange} />
+        </>
       )}
     </div>
   );
