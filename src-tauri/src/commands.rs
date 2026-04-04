@@ -40,11 +40,12 @@ pub async fn update_task(
     description: Option<Option<String>>,
     enabled: Option<bool>,
     run_if_missed: Option<bool>,
+    notify_on_run: Option<bool>,
     schedule: Option<Schedule>,
     action: Option<Action>,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    let task = state.store.update_task(&id, name, description, enabled, run_if_missed, schedule, action)
+    let task = state.store.update_task(&id, name, description, enabled, run_if_missed, notify_on_run, schedule, action)
         .await.map_err(|e| e.to_string())?;
     state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
     if task.enabled {

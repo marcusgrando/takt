@@ -39,6 +39,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
   const [schedule, setSchedule] = useState<Schedule>(initialSchedule);
   const [action, setAction] = useState<Action>(initialAction);
   const [runIfMissed, setRunIfMissed] = useState(task?.run_if_missed ?? true);
+  const [notifyOnRun, setNotifyOnRun] = useState(task?.notify_on_run ?? false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -52,6 +53,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     schedule: JSON.stringify(initialSchedule),
     action: JSON.stringify(initialAction),
     runIfMissed: task?.run_if_missed ?? true,
+    notifyOnRun: task?.notify_on_run ?? false,
   });
 
   // Auto-name generation
@@ -74,8 +76,9 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     if (JSON.stringify(schedule) !== snap.schedule) return true;
     if (JSON.stringify(action) !== snap.action) return true;
     if (runIfMissed !== snap.runIfMissed) return true;
+    if (notifyOnRun !== snap.notifyOnRun) return true;
     return false;
-  }, [name, nameManual, description, schedule, action, runIfMissed, isEdit]);
+  }, [name, nameManual, description, schedule, action, runIfMissed, notifyOnRun, isEdit]);
 
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
@@ -130,7 +133,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     setSaving(true);
     try {
       if (isEdit) {
-        await updateTask({ id: task!.id, name: name.trim(), description: description.trim() || null, run_if_missed: runIfMissed, schedule, action });
+        await updateTask({ id: task!.id, name: name.trim(), description: description.trim() || null, run_if_missed: runIfMissed, notify_on_run: notifyOnRun, schedule, action });
       } else {
         await createTask({ name: name.trim(), description: description.trim() || undefined, schedule, action });
       }
@@ -213,6 +216,15 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
             <p className="text-xs text-muted-foreground">Execute on wake if a run was missed while inactive</p>
           </div>
           <Switch checked={runIfMissed} onCheckedChange={setRunIfMissed} />
+        </div>
+
+        {/* Notify on run */}
+        <div className="flex items-center justify-between">
+          <div>
+            <Label>Notify on run</Label>
+            <p className="text-xs text-muted-foreground">Show a notification when the task executes</p>
+          </div>
+          <Switch checked={notifyOnRun} onCheckedChange={setNotifyOnRun} />
         </div>
 
         <Separator />

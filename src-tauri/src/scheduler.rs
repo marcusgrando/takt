@@ -4,6 +4,7 @@ use crate::store::TaskStore;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use uuid::Uuid;
@@ -46,17 +47,19 @@ pub struct AppScheduler {
     inner: JobScheduler,
     executor: Arc<Box<dyn ActionExecutor>>,
     store: Arc<TaskStore>,
+    app_handle: tauri::AppHandle,
     job_ids: Mutex<HashMap<String, Uuid>>,
 }
 
 impl AppScheduler {
     pub async fn new(store: Arc<TaskStore>, app_handle: tauri::AppHandle) -> anyhow::Result<Self> {
         let inner = JobScheduler::new().await?;
-        let executor = Arc::new(current_executor(app_handle));
+        let executor = Arc::new(current_executor(app_handle.clone()));
         Ok(Self {
             inner,
             executor,
             store,
+            app_handle,
             job_ids: Mutex::new(HashMap::new()),
         })
     }
@@ -106,6 +109,9 @@ impl AppScheduler {
                 let executor = Arc::clone(&self.executor);
                 let store = Arc::clone(&self.store);
                 let task_id = task.id.clone();
+                let task_name = task.name.clone();
+                let notify = task.notify_on_run;
+                let app_handle = self.app_handle.clone();
                 let action = task.action.clone();
                 tokio::spawn(async move {
                     let result = executor.execute(&action).await;
@@ -113,6 +119,9 @@ impl AppScheduler {
                         Ok(r) => ("success", r.stdout, r.stderr, None),
                         Err(e) => ("failure", None, None, Some(e.to_string())),
                     };
+                    if notify && status == "success" {
+                        send_run_notification(&app_handle, &task_name);
+                    }
                     let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                     let _ = store.update_last_run(&task_id, None).await;
                 });
@@ -122,9 +131,12 @@ impl AppScheduler {
 
     pub async fn schedule_task(&self, task: &TaskDto) -> anyhow::Result<()> {
         let task_id = task.id.clone();
+        let task_name = task.name.clone();
+        let notify = task.notify_on_run;
         let action = task.action.clone();
         let executor = Arc::clone(&self.executor);
         let store = Arc::clone(&self.store);
+        let app_handle = self.app_handle.clone();
 
         match &task.schedule {
             Schedule::Cron { expression } => {
@@ -132,6 +144,8 @@ impl AppScheduler {
                 let store_guard = Arc::clone(&store);
                 let task_id_for_closure = task_id.clone();
                 let task_id_guard = task_id.clone();
+                let task_name = task_name.clone();
+                let app_handle = app_handle.clone();
 
                 let job = Job::new_async_tz(expr.as_str(), Local, move |_uuid, _lock| {
                     let action = action.clone();
@@ -140,6 +154,8 @@ impl AppScheduler {
                     let task_id = task_id_for_closure.clone();
                     let store_guard = Arc::clone(&store_guard);
                     let task_id_guard = task_id_guard.clone();
+                    let task_name = task_name.clone();
+                    let app_handle = app_handle.clone();
                     Box::pin(async move {
                         // Guard: re-fetch task to check enabled/deleted
                         match store_guard.get_task(&task_id_guard).await {
@@ -156,6 +172,9 @@ impl AppScheduler {
                             Ok(r) => ("success", r.stdout, r.stderr, None),
                             Err(e) => ("failure", None, None, Some(e.to_string())),
                         };
+                        if notify && status == "success" {
+                            send_run_notification(&app_handle, &task_name);
+                        }
                         let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                         let _ = store.update_last_run(&task_id, None).await;
                     })
@@ -186,6 +205,9 @@ impl AppScheduler {
                             Ok(r) => ("success", r.stdout, r.stderr, None),
                             Err(e) => ("failure", None, None, Some(e.to_string())),
                         };
+                        if notify && status == "success" {
+                            send_run_notification(&app_handle, &task_name);
+                        }
                         let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                         let _ = store.update_last_run(&task_id, None).await;
                     });
@@ -252,6 +274,9 @@ impl AppScheduler {
                         Ok(r) => ("success", r.stdout, r.stderr, None),
                         Err(e) => ("failure", None, None, Some(e.to_string())),
                     };
+                    if notify && status == "success" {
+                        send_run_notification(&app_handle, &task_name);
+                    }
                     let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                     let _ = store.update_last_run(&task_id, None).await;
                 });
@@ -267,6 +292,15 @@ impl AppScheduler {
         }
         Ok(())
     }
+}
+
+fn send_run_notification(app: &tauri::AppHandle, task_name: &str) {
+    let _ = app
+        .notification()
+        .builder()
+        .title(task_name)
+        .body("Task executed successfully")
+        .show();
 }
 
 /// Check if a task's last_run_at is today in local timezone.

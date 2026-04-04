@@ -40,8 +40,8 @@ impl TaskStore {
         let action_json = serde_json::to_string(&action)?;
 
         sqlx::query(
-            "INSERT INTO tasks (id, name, description, enabled, run_if_missed, schedule_json, action_json, created_at, updated_at)
-             VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?)"
+            "INSERT INTO tasks (id, name, description, enabled, run_if_missed, notify_on_run, schedule_json, action_json, created_at, updated_at)
+             VALUES (?, ?, ?, 1, 1, 0, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&name)
@@ -63,6 +63,7 @@ impl TaskStore {
         description: Option<Option<String>>,
         enabled: Option<bool>,
         run_if_missed: Option<bool>,
+        notify_on_run: Option<bool>,
         schedule: Option<Schedule>,
         action: Option<Action>,
     ) -> anyhow::Result<TaskDto> {
@@ -73,17 +74,19 @@ impl TaskStore {
         let description = description.unwrap_or(existing.description);
         let enabled = enabled.unwrap_or(existing.enabled);
         let run_if_missed = run_if_missed.unwrap_or(existing.run_if_missed);
+        let notify_on_run = notify_on_run.unwrap_or(existing.notify_on_run);
         let schedule = schedule.unwrap_or(existing.schedule);
         let action = action.unwrap_or(existing.action);
         let now = Utc::now().to_rfc3339();
 
         sqlx::query(
-            "UPDATE tasks SET name=?, description=?, enabled=?, run_if_missed=?, schedule_json=?, action_json=?, updated_at=? WHERE id=?"
+            "UPDATE tasks SET name=?, description=?, enabled=?, run_if_missed=?, notify_on_run=?, schedule_json=?, action_json=?, updated_at=? WHERE id=?"
         )
         .bind(&name)
         .bind(&description)
         .bind(enabled as i64)
         .bind(run_if_missed as i64)
+        .bind(notify_on_run as i64)
         .bind(serde_json::to_string(&schedule)?)
         .bind(serde_json::to_string(&action)?)
         .bind(&now)

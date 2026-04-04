@@ -16,6 +16,7 @@ pub struct Task {
     pub description: Option<String>,
     pub enabled: i64,          // SQLite stores booleans as INTEGER (0/1)
     pub run_if_missed: i64,    // catch-up: run on wake if missed
+    pub notify_on_run: i64,    // send notification after execution
     pub schedule_json: String, // JSON-serialized Schedule
     pub action_json: String,   // JSON-serialized Action
     pub created_at: String,    // ISO 8601
@@ -31,6 +32,7 @@ pub struct TaskDto {
     pub description: Option<String>,
     pub enabled: bool,
     pub run_if_missed: bool,
+    pub notify_on_run: bool,
     pub schedule: Schedule,
     pub action: Action,
     pub created_at: String,
@@ -148,6 +150,7 @@ impl Task {
             description: self.description.clone(),
             enabled: self.enabled != 0,
             run_if_missed: self.run_if_missed != 0,
+            notify_on_run: self.notify_on_run != 0,
             schedule,
             action,
             created_at: self.created_at.clone(),

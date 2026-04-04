@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     description TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
     run_if_missed INTEGER NOT NULL DEFAULT 1,
+    notify_on_run INTEGER NOT NULL DEFAULT 0,
     schedule_json TEXT NOT NULL,
     action_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
