@@ -39,6 +39,12 @@ function describeAction(action: Action): string {
         return `${action.method} webhook`;
       }
     }
+    case 'Settings': {
+      // Extract label from pane_url
+      const id = action.pane_url.split(':')[1] ?? '';
+      const name = id.split('.').pop()?.replace('-Settings', '').replace('.extension', '').replace('-', ' ') || 'Settings';
+      return `Open ${name}`;
+    }
   }
 }
 

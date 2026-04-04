@@ -1,6 +1,6 @@
 use crate::models::{Schedule, Action, TaskDto, ExecutionLog};
 use crate::AppState;
-use tauri::State;
+use tauri::{AppHandle, State};
 use objc2_app_kit::NSWorkspace;
 use objc2_foundation::{NSURL, NSString};
 
@@ -120,4 +120,16 @@ pub fn list_browsers() -> Vec<String> {
 pub fn list_apps_for_file(path: String) -> Vec<String> {
     let url = NSURL::fileURLWithPath(&NSString::from_str(&path));
     apps_for_url(&url)
+}
+
+#[tauri::command]
+pub fn set_activation_policy(app: AppHandle, policy: String) {
+    #[cfg(target_os = "macos")]
+    {
+        let p = match policy.as_str() {
+            "regular" => tauri::ActivationPolicy::Regular,
+            _ => tauri::ActivationPolicy::Accessory,
+        };
+        let _ = app.set_activation_policy(p);
+    }
 }

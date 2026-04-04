@@ -72,6 +72,11 @@ impl ActionExecutor for MacosExecutor {
                 }
                 Ok(ExecutionResult { stdout: None, stderr: None })
             }
+            Action::Settings { pane_url } => {
+                let pane_url = pane_url.clone();
+                run_on_main(&self.app_handle, move || open_url(&pane_url, None))?;
+                Ok(ExecutionResult { stdout: None, stderr: None })
+            }
             Action::RunCommand { command, args, shell } => run_command(command, args, shell),
             Action::Notify { title, body, sound } => {
                 send_notification(&self.app_handle, title, body, *sound)

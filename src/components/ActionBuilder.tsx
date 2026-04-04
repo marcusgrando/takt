@@ -22,6 +22,7 @@ const ACTION_TYPES: { type: Action['type']; label: string }[] = [
   { type: 'RunCommand', label: 'Cmd' },
   { type: 'Notify', label: 'Notify' },
   { type: 'Webhook', label: 'Hook' },
+  { type: 'Settings', label: 'Settings' },
 ];
 
 const SHELLS: Shell[] = ['Sh', 'Bash', 'Zsh', 'Python', 'AppleScript'];
@@ -68,6 +69,7 @@ function defaultAction(type: Action['type']): Action {
     case 'RunCommand': return { type: 'RunCommand', command: '', args: [], shell: 'Zsh' };
     case 'Notify': return { type: 'Notify', title: '', body: '', sound: true };
     case 'Webhook': return { type: 'Webhook', url: '', method: 'GET', headers: {}, body: undefined };
+    case 'Settings': return { type: 'Settings', pane_url: SYSTEM_SETTINGS_PRESETS[0].url };
   }
 }
 
@@ -200,9 +202,9 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
   return (
     <div className="space-y-4">
       <Tabs value={value.type} onValueChange={handleTypeChange}>
-        <TabsList className="w-full flex-wrap h-auto gap-0 p-1">
+        <TabsList className="w-full grid grid-cols-4 h-auto gap-0 p-1">
           {ACTION_TYPES.map(({ type, label }) => (
-            <TabsTrigger key={type} value={type} className="flex-1">{label}</TabsTrigger>
+            <TabsTrigger key={type} value={type}>{label}</TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
@@ -255,16 +257,6 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
           <div className="space-y-2">
             <Label>URL</Label>
             <Input value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://example.com" />
-          </div>
-          <div className="space-y-2">
-            <Label>Quick fill <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Select value="__none__" onValueChange={(v) => { if (v !== '__none__') onChange({ ...value, url: v }); }}>
-              <SelectTrigger><SelectValue placeholder="System Settings..." /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__" disabled className="hidden">System Settings...</SelectItem>
-                {SYSTEM_SETTINGS_PRESETS.map((p) => <SelectItem key={p.url} value={p.url}>{p.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
           </div>
           <div className="space-y-2">
             <Label>Browser <span className="text-muted-foreground font-normal">(optional)</span></Label>
@@ -359,6 +351,18 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
             <Label>Body <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Textarea value={value.body ?? ''} onChange={(e) => onChange({ ...value, body: e.target.value || undefined })} placeholder='{"key": "value"}' className="font-mono resize-none" rows={3} />
           </div>
+        </div>
+      )}
+
+      {value.type === 'Settings' && (
+        <div className="space-y-2">
+          <Label>Settings panel</Label>
+          <Select value={value.pane_url} onValueChange={(v) => onChange({ ...value, pane_url: v })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SYSTEM_SETTINGS_PRESETS.map((p) => <SelectItem key={p.url} value={p.url}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

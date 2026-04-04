@@ -39,6 +39,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   // Auto-name generation
   useEffect(() => {
@@ -46,6 +47,22 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
       setName(generateAutoName(action, schedule));
     }
   }, [action, schedule, nameManual]);
+
+  // Track changes
+  useEffect(() => {
+    setDirty(true);
+  }, [name, description, schedule, action]);
+
+  // Warn on close with unsaved changes
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (dirty && !saving && !deleting) {
+        e.preventDefault();
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirty, saving, deleting]);
 
   function handleNameChange(value: string) {
     setNameManual(true);

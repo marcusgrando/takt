@@ -94,6 +94,9 @@ pub enum Action {
         headers: HashMap<String, String>,
         body: Option<String>,
     },
+    Settings {
+        pane_url: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

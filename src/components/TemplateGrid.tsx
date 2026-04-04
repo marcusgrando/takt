@@ -2,7 +2,7 @@ import { Link, FileText, AppWindow, Terminal, Bell, Globe, Settings } from 'luci
 import { Button } from '@/components/ui/button';
 import type { Action, Schedule } from '@/lib/api';
 
-export type TemplateName = 'OpenUrl' | 'OpenFile' | 'OpenApp' | 'RunCommand' | 'Notify' | 'Webhook' | 'Custom';
+export type TemplateName = 'OpenUrl' | 'OpenFile' | 'OpenApp' | 'RunCommand' | 'Notify' | 'Webhook' | 'Settings';
 
 export interface TemplateConfig {
   name: TemplateName;
@@ -56,10 +56,10 @@ export const TEMPLATES: TemplateConfig[] = [
     schedule: { type: 'Cron', expression: '0 * * * *' },
   },
   {
-    name: 'Custom',
-    label: 'Custom',
+    name: 'Settings',
+    label: 'Settings',
     icon: <Settings className="size-5" />,
-    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [], shortcut_delay_secs: 2 },
+    action: { type: 'Settings', pane_url: 'x-apple.systempreferences:com.apple.settings.General' },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
 ];

@@ -29,7 +29,8 @@ export type Action =
       method: HttpMethod;
       headers: Record<string, string>;
       body?: string;
-    };
+    }
+  | { type: 'Settings'; pane_url: string };
 
 export interface TaskDto {
   id: string;

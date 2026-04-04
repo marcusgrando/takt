@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Clock } from 'lucide-react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { invoke } from '@tauri-apps/api/core';
 import { queryClient } from '@/lib';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -19,6 +20,9 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
   const url = `/src/editor.html?${query.toString()}`;
 
   try {
+    // Show in Cmd+Tab while editor is open
+    await invoke('set_activation_policy', { policy: 'regular' });
+
     const win = new WebviewWindow(label, {
       url,
       title: params.taskId ? 'Edit Task — cronmac' : 'New Task — cronmac',
@@ -29,9 +33,10 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
       decorations: true,
     });
 
-    // Refresh task list when editor closes
+    // Refresh task list and hide from Cmd+Tab when editor closes
     win.once('tauri://destroyed', () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      invoke('set_activation_policy', { policy: 'accessory' });
     });
   } catch (err) {
     console.error('Failed to open editor window:', err);
@@ -40,6 +45,19 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
 
 export default function App() {
   const [view, setView] = useState<View>('list');
+
+  // ESC closes the popover
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
+          getCurrentWebviewWindow().hide();
+        });
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   function handleTemplateSelect(template: TemplateName) {
     openEditorWindow({ template });
