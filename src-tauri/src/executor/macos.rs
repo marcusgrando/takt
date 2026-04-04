@@ -22,7 +22,7 @@ impl ActionExecutor for MacosExecutor {
             Action::OpenFile { path } => open_file(path),
             Action::OpenUrl { url, browser } => open_url(url, browser.as_deref()),
             Action::RunCommand { command, args, shell } => run_command(command, args, shell),
-            Action::Notify { title, body, sound: _ } => send_notification(title, body),
+            Action::Notify { title, body, sound } => send_notification(title, body, *sound),
             Action::Shortcut { keys } => send_shortcut(keys),
             Action::Webhook { url, method, headers, body } => {
                 send_webhook(url, method, headers, body.as_deref()).await
@@ -93,11 +93,13 @@ fn run_command(
     }
 }
 
-fn send_notification(title: &str, body: &str) -> Result<ExecutionResult, ExecutorError> {
+fn send_notification(title: &str, body: &str, sound: bool) -> Result<ExecutionResult, ExecutorError> {
+    let sound_part = if sound { r#" sound name "default""# } else { "" };
     let script = format!(
-        r#"display notification "{}" with title "{}""#,
+        r#"display notification "{}" with title "{}"{}"#,
         body.replace('"', r#"\""#),
-        title.replace('"', r#"\""#)
+        title.replace('"', r#"\""#),
+        sound_part
     );
     let output = Command::new("osascript").arg("-e").arg(&script).output()?;
     if output.status.success() {
