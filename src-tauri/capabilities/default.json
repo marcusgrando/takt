@@ -9,7 +9,9 @@
   "permissions": [
     "core:default",
     "core:window:allow-create",
+    "core:window:allow-close",
     "core:webview:allow-create-webview-window",
+    "dialog:default",
     "opener:default",
     "notification:default",
     "shell:default"

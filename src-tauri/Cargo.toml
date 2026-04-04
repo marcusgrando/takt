@@ -34,4 +34,5 @@ async-trait = "0.1"
 dirs = "5"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
 

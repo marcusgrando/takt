@@ -27,6 +27,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Hide from dock — must be set before any window is shown
             #[cfg(target_os = "macos")]
