@@ -76,24 +76,25 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
   }
 
   return (
-    <div className="flex flex-col gap-1.5 px-4 py-2.5 hover:bg-muted/50 transition-colors">
-      {/* Row 1: toggle + name */}
-      <div className="flex items-center gap-2.5 min-w-0">
+    <div className="flex flex-col gap-1 px-4 py-2.5 hover:bg-muted/50 transition-colors">
+      {/* Row 1: name + badge */}
+      <div className="flex items-center gap-2 min-w-0">
         <div className={`size-1.5 rounded-full shrink-0 ${task.enabled ? 'bg-green-500' : 'bg-muted-foreground/25'}`} />
+        <span className="text-sm font-medium truncate min-w-0 flex-1">{task.name}</span>
+        <Badge variant="secondary" className={`${actionBadgeClass(task.action)} text-[10px] px-1.5 py-0 shrink-0`}>
+          {actionLabel(task.action)}
+        </Badge>
+      </div>
+
+      {/* Row 2: toggle + actions */}
+      <div className="flex items-center gap-2 pl-[14px]">
         <Switch
           checked={task.enabled}
           onCheckedChange={handleToggle}
           disabled={isToggling}
           aria-label={`Toggle ${task.name}`}
         />
-        <span className="text-sm font-medium truncate min-w-0 flex-1">{task.name}</span>
-      </div>
-
-      {/* Row 2: badge + actions */}
-      <div className="flex items-center gap-1.5 pl-[26px]">
-        <Badge variant="secondary" className={`${actionBadgeClass(task.action)} text-[10px] px-1.5 py-0`}>
-          {actionLabel(task.action)}
-        </Badge>
+        <span className="text-xs text-muted-foreground">{task.enabled ? 'On' : 'Off'}</span>
         <div className="flex-1" />
         <div className="flex items-center -mr-1.5">
           <Button variant="ghost" size="icon-sm" onClick={handleRun} disabled={isRunning} title="Run now">
