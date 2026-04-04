@@ -73,8 +73,8 @@ pub async fn run_task_now(id: String, app: AppHandle, state: State<'_, AppState>
     if task.notify_on_run && status == STATUS_SUCCESS {
         let _ = app.notification()
             .builder()
-            .title(&task.name)
-            .body("Task executed successfully")
+            .title("cronmac")
+            .body(&format!("Executed: {}", task.name))
             .show();
     }
     state.store.log_execution(&id, status, stdout, stderr, error)

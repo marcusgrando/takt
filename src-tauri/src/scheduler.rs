@@ -298,8 +298,8 @@ fn send_run_notification(app: &tauri::AppHandle, task_name: &str) {
     let _ = app
         .notification()
         .builder()
-        .title(task_name)
-        .body("Task executed successfully")
+        .title("cronmac")
+        .body(&format!("Executed: {}", task_name))
         .show();
 }
 
