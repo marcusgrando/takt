@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod executor;
+mod launch_agent;
 mod models;
 mod scheduler;
 mod store;
@@ -42,6 +43,9 @@ pub fn run() {
                     .visible(false)
                     .skip_taskbar(true)
                     .build()?;
+
+            // Register LaunchAgent for auto-start on login (macOS only, bundled .app)
+            launch_agent::ensure_registered();
 
             // Block on async init so AppState is managed before setup() returns.
             // This guarantees IPC handlers cannot be invoked before state is ready.
