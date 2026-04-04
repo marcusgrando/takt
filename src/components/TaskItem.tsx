@@ -15,7 +15,7 @@ interface TaskItemProps {
 function actionLabel(action: Action): string {
   const map: Record<Action['type'], string> = {
     RunCommand: 'shell', OpenUrl: 'url', Notify: 'notify',
-    OpenFile: 'file', Shortcut: 'shortcut', Webhook: 'webhook',
+    OpenFile: 'file', OpenApp: 'app', Webhook: 'webhook',
   };
   return map[action.type] ?? 'unknown';
 }
@@ -26,7 +26,7 @@ function actionBadgeClass(action: Action): string {
     RunCommand: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-transparent',
     Notify:     'bg-orange-500/15 text-orange-700 dark:text-orange-400 border-transparent',
     OpenFile:   'bg-green-500/15 text-green-700 dark:text-green-400 border-transparent',
-    Shortcut:   'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-transparent',
+    OpenApp:    'bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border-transparent',
     Webhook:    'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-transparent',
   };
   return map[action.type] ?? 'border-transparent';

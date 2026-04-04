@@ -16,6 +16,11 @@ function describeAction(action: Action): string {
       const name = action.path.split('/').pop() || action.path;
       return `Open ${name}`;
     }
+    case 'OpenApp': {
+      if (!action.app_path) return 'Open app';
+      const name = action.app_path.split('/').pop()?.replace('.app', '') || action.app_path;
+      return `Open ${name}`;
+    }
     case 'RunCommand': {
       if (!action.command) return 'Run command';
       const cmd = action.command.split(/\s/)[0].split('/').pop() || action.command;
@@ -24,10 +29,6 @@ function describeAction(action: Action): string {
     case 'Notify': {
       if (!action.title) return 'Reminder';
       return `Reminder: ${action.title}`;
-    }
-    case 'Shortcut': {
-      if (action.keys.length === 0) return 'Shortcut';
-      return `Shortcut ${action.keys.join('+')}`;
     }
     case 'Webhook': {
       if (!action.url) return 'Webhook';

@@ -1,8 +1,8 @@
-import { Link, FileText, Terminal, Bell, Globe, Settings } from 'lucide-react';
+import { Link, FileText, AppWindow, Terminal, Bell, Globe, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Action, Schedule } from '@/lib/api';
 
-export type TemplateName = 'OpenUrl' | 'OpenFile' | 'RunCommand' | 'Notify' | 'Webhook' | 'Custom';
+export type TemplateName = 'OpenUrl' | 'OpenFile' | 'OpenApp' | 'RunCommand' | 'Notify' | 'Webhook' | 'Custom';
 
 export interface TemplateConfig {
   name: TemplateName;
@@ -17,14 +17,21 @@ export const TEMPLATES: TemplateConfig[] = [
     name: 'OpenUrl',
     label: 'Open URL',
     icon: <Link className="size-5" />,
-    action: { type: 'OpenUrl', url: '', browser: undefined },
+    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [] },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
   {
     name: 'OpenFile',
     label: 'Open File',
     icon: <FileText className="size-5" />,
-    action: { type: 'OpenFile', path: '' },
+    action: { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [] },
+    schedule: { type: 'Cron', expression: '0 9 * * *' },
+  },
+  {
+    name: 'OpenApp',
+    label: 'Open App',
+    icon: <AppWindow className="size-5" />,
+    action: { type: 'OpenApp', app_path: '', post_shortcuts: [] },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
   {
@@ -52,7 +59,7 @@ export const TEMPLATES: TemplateConfig[] = [
     name: 'Custom',
     label: 'Custom',
     icon: <Settings className="size-5" />,
-    action: { type: 'OpenUrl', url: '', browser: undefined },
+    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [] },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
 ];
