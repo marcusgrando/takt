@@ -76,29 +76,26 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
   }
 
   return (
-    <div className="group flex flex-col gap-2 px-4 py-3 hover:bg-muted/50 transition-colors">
-      <div className="flex items-center gap-3">
-        {/* Status indicator */}
-        <div className={`size-2 rounded-full shrink-0 ${task.enabled ? 'bg-green-500' : 'bg-muted-foreground/25'}`} />
-
-        {/* Switch */}
+    <div className="flex flex-col gap-1.5 px-4 py-2.5 hover:bg-muted/50 transition-colors">
+      {/* Row 1: toggle + name */}
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className={`size-1.5 rounded-full shrink-0 ${task.enabled ? 'bg-green-500' : 'bg-muted-foreground/25'}`} />
         <Switch
           checked={task.enabled}
           onCheckedChange={handleToggle}
           disabled={isToggling}
           aria-label={`Toggle ${task.name}`}
         />
+        <span className="text-sm font-medium truncate min-w-0 flex-1">{task.name}</span>
+      </div>
 
-        {/* Name + type badge */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-sm font-medium truncate">{task.name}</span>
-          <Badge variant="secondary" className={actionBadgeClass(task.action)}>
-            {actionLabel(task.action)}
-          </Badge>
-        </div>
-
-        {/* Hover actions */}
-        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+      {/* Row 2: badge + actions */}
+      <div className="flex items-center gap-1.5 pl-[26px]">
+        <Badge variant="secondary" className={`${actionBadgeClass(task.action)} text-[10px] px-1.5 py-0`}>
+          {actionLabel(task.action)}
+        </Badge>
+        <div className="flex-1" />
+        <div className="flex items-center -mr-1.5">
           <Button variant="ghost" size="icon-sm" onClick={handleRun} disabled={isRunning} title="Run now">
             {isRunning ? <Loader2 className="animate-spin" /> : <Play />}
           </Button>
