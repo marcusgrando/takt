@@ -205,7 +205,7 @@ mod tests {
         let task = store.create_task(
             "Original".to_string(),
             None,
-            Schedule::OnLogin,
+            Schedule::DailyFirstUse,
             Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
         ).await.unwrap();
 
@@ -228,7 +228,7 @@ mod tests {
         let task = store.create_task(
             "Delete Me".to_string(),
             None,
-            Schedule::OnLogin,
+            Schedule::DailyFirstUse,
             Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
         ).await.unwrap();
 
@@ -243,7 +243,7 @@ mod tests {
         let task = store.create_task(
             "Log Test".to_string(),
             None,
-            Schedule::OnLogin,
+            Schedule::DailyFirstUse,
             Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
         ).await.unwrap();
 

@@ -44,8 +44,7 @@ function describeAction(action: Action): string {
 
 function describeSchedule(schedule: Schedule): string {
   switch (schedule.type) {
-    case 'OnLogin': return 'On login';
-    case 'OnWake': return 'On wake';
+    case 'DailyFirstUse': return 'Daily first use';
     case 'OneShot': {
       const d = new Date(schedule.run_at);
       if (isNaN(d.getTime())) return 'One time';

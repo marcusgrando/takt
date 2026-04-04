@@ -32,10 +32,9 @@ function toDatetimeLocal(iso: string): string {
 }
 
 const SCHEDULE_TYPES: { type: Schedule['type']; label: string }[] = [
-  { type: 'Cron',    label: 'Recurring' },
-  { type: 'OneShot', label: 'One time' },
-  { type: 'OnLogin', label: 'On login' },
-  { type: 'OnWake',  label: 'On wake' },
+  { type: 'Cron',          label: 'Recurring' },
+  { type: 'OneShot',       label: 'One time' },
+  { type: 'DailyFirstUse', label: 'Daily first use' },
 ];
 
 export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
@@ -44,8 +43,7 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
     switch (type) {
       case 'Cron': onChange({ type: 'Cron', expression: '0 * * * *' }); break;
       case 'OneShot': onChange({ type: 'OneShot', run_at: new Date(Date.now() + 3_600_000).toISOString() }); break;
-      case 'OnLogin': onChange({ type: 'OnLogin' }); break;
-      case 'OnWake': onChange({ type: 'OnWake' }); break;
+      case 'DailyFirstUse': onChange({ type: 'DailyFirstUse' }); break;
     }
   }
 
@@ -100,9 +98,9 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
         </div>
       )}
 
-      {(value.type === 'OnLogin' || value.type === 'OnWake') && (
+      {value.type === 'DailyFirstUse' && (
         <p className="text-sm text-muted-foreground">
-          {value.type === 'OnLogin' ? 'Task will run each time you log in.' : 'Task will run each time the system wakes from sleep.'}
+          Runs once per day, 5 minutes after you start using your Mac.
         </p>
       )}
     </div>

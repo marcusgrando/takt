@@ -121,8 +121,61 @@ impl AppScheduler {
                     });
                 }
             }
-            Schedule::OnLogin | Schedule::OnWake => {
+            Schedule::DailyFirstUse => {
+                // Executes once per day after 5 minutes of continuous active use.
+                // If the Mac sleeps/locks before 5 minutes, the timer resets.
+                // Uses wall-clock gap detection: if a 30s tick takes much longer,
+                // the system was asleep — reset accumulated time.
+                let store_guard = Arc::clone(&store);
+                let task_id_guard = task_id.clone();
                 tokio::spawn(async move {
+                    // Check if already executed today
+                    if ran_today(&store_guard, &task_id_guard).await {
+                        return;
+                    }
+
+                    // Accumulate 5 minutes of active use in 30s ticks
+                    const REQUIRED_SECS: u64 = 300;
+                    const TICK_SECS: u64 = 30;
+                    // If a tick takes more than 3x expected, system was likely asleep
+                    const SLEEP_THRESHOLD_SECS: u64 = TICK_SECS * 3;
+
+                    let mut accumulated_secs: u64 = 0;
+                    loop {
+                        let before = std::time::Instant::now();
+                        tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
+                        let elapsed = before.elapsed().as_secs();
+
+                        if elapsed > SLEEP_THRESHOLD_SECS {
+                            // System was asleep — reset accumulated time
+                            accumulated_secs = 0;
+                            // Re-check if already ran today (date might have changed)
+                            if ran_today(&store_guard, &task_id_guard).await {
+                                return;
+                            }
+                            continue;
+                        }
+
+                        accumulated_secs += TICK_SECS;
+                        if accumulated_secs >= REQUIRED_SECS {
+                            break;
+                        }
+                    }
+
+                    // Final checks: enabled, not deleted, not yet ran today
+                    match store_guard.get_task(&task_id_guard).await {
+                        Ok(Some(t)) if t.enabled => {
+                            if ran_today(&store_guard, &task_id_guard).await {
+                                return;
+                            }
+                        }
+                        Ok(Some(_)) => {
+                            let _ = store.log_execution(&task_id, "skipped", None, None, None).await;
+                            return;
+                        }
+                        _ => return,
+                    }
+
                     let result = executor.execute(&action).await;
                     let (status, stdout, stderr, error) = match result {
                         Ok(r) => ("success", r.stdout, r.stderr, None),
@@ -142,5 +195,21 @@ impl AppScheduler {
             self.inner.remove(&job_uuid).await?;
         }
         Ok(())
+    }
+}
+
+/// Check if a task's last_run_at is today in local timezone.
+async fn ran_today(store: &TaskStore, task_id: &str) -> bool {
+    match store.get_task(task_id).await {
+        Ok(Some(t)) => {
+            if let Some(ref last_run) = t.last_run_at {
+                if let Ok(last) = chrono::DateTime::parse_from_rfc3339(last_run) {
+                    let last_local = last.with_timezone(&chrono::Local);
+                    return last_local.date_naive() == chrono::Local::now().date_naive();
+                }
+            }
+            false
+        }
+        _ => false,
     }
 }

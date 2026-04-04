@@ -15,8 +15,7 @@ export interface KeyCombo {
 export type Schedule =
   | { type: 'Cron'; expression: string }
   | { type: 'OneShot'; run_at: string } // ISO 8601
-  | { type: 'OnLogin' }
-  | { type: 'OnWake' };
+  | { type: 'DailyFirstUse' };
 
 export type Action =
   | { type: 'OpenFile'; path: string; app?: string; post_shortcuts: KeyCombo[] }

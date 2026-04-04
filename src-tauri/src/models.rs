@@ -34,8 +34,7 @@ pub struct TaskDto {
 pub enum Schedule {
     Cron { expression: String },
     OneShot { run_at: String }, // ISO 8601 DateTime
-    OnLogin,
-    OnWake,
+    DailyFirstUse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
