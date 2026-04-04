@@ -4781,6 +4781,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "block2",
  "chrono",
  "core-graphics 0.24.0",
  "dirs 5.0.1",

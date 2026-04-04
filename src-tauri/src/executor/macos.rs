@@ -4,8 +4,8 @@ use crate::models::{Action, HttpMethod, KeyCombo, Modifier, Shell};
 use async_trait::async_trait;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use objc2_app_kit::NSWorkspace;
-use objc2_foundation::{NSURL, NSString};
+use objc2_app_kit::{NSWorkspace, NSWorkspaceOpenConfiguration};
+use objc2_foundation::{NSArray, NSURL, NSString};
 use std::process::Command;
 use std::time::Duration;
 use tauri_plugin_notification::NotificationExt;
@@ -62,36 +62,47 @@ impl ActionExecutor for MacosExecutor {
 
 // ── Open via NSWorkspace ────────────────────────────────────────────
 
+fn make_target_url(target: &str) -> Result<objc2::rc::Retained<NSURL>, ExecutorError> {
+    if target.starts_with("http://") || target.starts_with("https://") {
+        NSURL::URLWithString(&NSString::from_str(target))
+            .ok_or_else(|| ExecutorError::CommandFailed(format!("Invalid URL: {}", target)))
+    } else {
+        Ok(NSURL::fileURLWithPath(&NSString::from_str(target)))
+    }
+}
+
+fn resolve_app_url(app_name: &str) -> objc2::rc::Retained<NSURL> {
+    let path = if app_name.ends_with(".app") || app_name.starts_with('/') {
+        app_name.to_string()
+    } else {
+        format!("/Applications/{}.app", app_name)
+    };
+    NSURL::fileURLWithPath(&NSString::from_str(&path))
+}
+
 fn open_with_command(target: &str, app: Option<&str>, is_app: bool) -> Result<(), ExecutorError> {
-    // Use NSWorkspace for opening - it's the native macOS way
     let workspace = NSWorkspace::sharedWorkspace();
 
     if is_app {
-        // Opening an application
-        let url = NSURL::fileURLWithPath(&NSString::from_str(target));
-        let opened = workspace.openURL(&url);
-        if !opened {
-            return Err(ExecutorError::CommandFailed(format!("Failed to open app: {}", target)));
-        }
+        // Open an application via NSWorkspace
+        let app_url = NSURL::fileURLWithPath(&NSString::from_str(target));
+        let config = NSWorkspaceOpenConfiguration::configuration();
+        // Fire-and-forget — completionHandler is None
+        workspace.openApplicationAtURL_configuration_completionHandler(
+            &app_url, &config, None,
+        );
     } else if let Some(app_name) = app {
-        // Open file/URL with specific app - use `open -a` command as fallback
-        // NSWorkspace's openURLs:withApplicationAtURL: requires complex configuration
-        let mut cmd = Command::new("open");
-        cmd.arg("-a").arg(app_name).arg(target);
-        let output = cmd.output()?;
-        if !output.status.success() {
-            return Err(ExecutorError::CommandFailed(
-                String::from_utf8_lossy(&output.stderr).to_string()
-            ));
-        }
+        // Open file/URL with a specific app via NSWorkspace
+        let target_url = make_target_url(target)?;
+        let app_url = resolve_app_url(app_name);
+        let config = NSWorkspaceOpenConfiguration::configuration();
+        let urls = NSArray::from_retained_slice(&[target_url]);
+        workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
+            &urls, &app_url, &config, None,
+        );
     } else {
         // Open with default handler
-        let url = if target.starts_with("http://") || target.starts_with("https://") {
-            NSURL::URLWithString(&NSString::from_str(target))
-                .ok_or_else(|| ExecutorError::CommandFailed(format!("Invalid URL: {}", target)))?
-        } else {
-            NSURL::fileURLWithPath(&NSString::from_str(target))
-        };
+        let url = make_target_url(target)?;
         let opened = workspace.openURL(&url);
         if !opened {
             return Err(ExecutorError::CommandFailed(format!("Failed to open: {}", target)));
