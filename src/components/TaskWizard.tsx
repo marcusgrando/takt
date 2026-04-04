@@ -44,6 +44,13 @@ export default function TaskWizard({ initialTask, onSaved, onCancel }: TaskWizar
       setSaveError('Cron expression cannot be empty');
       return;
     }
+    if (schedule.type === 'OneShot') {
+      const d = new Date((schedule as { type: 'OneShot'; run_at: string }).run_at ?? '');
+      if (isNaN(d.getTime())) {
+        setSaveError('Please set a valid date and time');
+        return;
+      }
+    }
 
     // Validate action
     if (action.type === 'OpenFile' && !(action.path?.trim())) {
