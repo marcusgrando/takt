@@ -5,6 +5,13 @@ import { invoke } from '@tauri-apps/api/core';
 export type Shell = 'Sh' | 'Bash' | 'Zsh' | 'Python' | 'AppleScript';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
+export type Modifier = 'Cmd' | 'Shift' | 'Opt' | 'Ctrl';
+
+export interface KeyCombo {
+  modifiers: Modifier[];
+  key: string;
+}
+
 export type Schedule =
   | { type: 'Cron'; expression: string }
   | { type: 'OneShot'; run_at: string } // ISO 8601
@@ -12,11 +19,11 @@ export type Schedule =
   | { type: 'OnWake' };
 
 export type Action =
-  | { type: 'OpenFile'; path: string }
-  | { type: 'OpenUrl'; url: string; browser?: string }
+  | { type: 'OpenFile'; path: string; app?: string; post_shortcuts: KeyCombo[] }
+  | { type: 'OpenUrl'; url: string; browser?: string; post_shortcuts: KeyCombo[] }
+  | { type: 'OpenApp'; app_path: string; post_shortcuts: KeyCombo[] }
   | { type: 'RunCommand'; command: string; args: string[]; shell: Shell }
   | { type: 'Notify'; title: string; body: string; sound: boolean }
-  | { type: 'Shortcut'; keys: string[] }
   | {
       type: 'Webhook';
       url: string;
