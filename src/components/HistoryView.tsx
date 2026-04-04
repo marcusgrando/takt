@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { listLogs, listTasks, type ExecutionLog } from '@/lib/api';
@@ -11,10 +11,12 @@ interface HistoryViewProps {
 
 function formatRelativeTime(isoString: string): string {
   const date = new Date(isoString);
+  if (isNaN(date.getTime())) return 'unknown';
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
 
+  if (diffSec < 0) return 'just now';
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
@@ -57,7 +59,7 @@ function LogEntry({ log, taskName }: { log: ExecutionLog; taskName: string }) {
       <div className="flex items-center gap-2">
         {/* Expand toggle */}
         <button
-          onClick={() => hasDetails && setExpanded((v) => !v)}
+          onClick={() => setExpanded((v) => !v)}
           disabled={!hasDetails}
           className="shrink-0 text-muted-foreground disabled:opacity-30"
           aria-label={expanded ? 'Collapse details' : 'Expand details'}
@@ -135,8 +137,9 @@ export default function HistoryView({ onBack }: HistoryViewProps) {
   });
 
   // Build a quick id→name lookup map
-  const taskNameById = new Map<string, string>(
-    tasks?.map((t) => [t.id, t.name]) ?? []
+  const taskNameById = useMemo(
+    () => new Map<string, string>(tasks?.map((t) => [t.id, t.name]) ?? []),
+    [tasks]
   );
 
   return (
@@ -162,7 +165,7 @@ export default function HistoryView({ onBack }: HistoryViewProps) {
           </div>
         )}
 
-        {logsError && !logsLoading && (
+        {logsError && (
           <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
             <p className="text-xs text-destructive">
               {logsError instanceof Error ? logsError.message : 'Failed to load history'}
