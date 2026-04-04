@@ -61,6 +61,12 @@ pub fn run() {
             // Request Accessibility permission (shows macOS prompt if not granted)
             request_accessibility_permission();
 
+            // Request Notification permission
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let _ = app.notification().request_permission();
+            }
+
             // Async init — block until AppState is ready before IPC is available
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {

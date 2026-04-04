@@ -119,8 +119,8 @@ impl AppScheduler {
                         Ok(r) => ("success", r.stdout, r.stderr, None),
                         Err(e) => ("failure", None, None, Some(e.to_string())),
                     };
-                    if notify && status == "success" {
-                        send_run_notification(&app_handle, &task_name);
+                    if notify {
+                        send_run_notification(&app_handle, &task_name, status == "success");
                     }
                     let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                     let _ = store.update_last_run(&task_id, None).await;
@@ -172,8 +172,8 @@ impl AppScheduler {
                             Ok(r) => ("success", r.stdout, r.stderr, None),
                             Err(e) => ("failure", None, None, Some(e.to_string())),
                         };
-                        if notify && status == "success" {
-                            send_run_notification(&app_handle, &task_name);
+                        if notify {
+                            send_run_notification(&app_handle, &task_name, status == "success");
                         }
                         let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                         let _ = store.update_last_run(&task_id, None).await;
@@ -205,8 +205,8 @@ impl AppScheduler {
                             Ok(r) => ("success", r.stdout, r.stderr, None),
                             Err(e) => ("failure", None, None, Some(e.to_string())),
                         };
-                        if notify && status == "success" {
-                            send_run_notification(&app_handle, &task_name);
+                        if notify {
+                            send_run_notification(&app_handle, &task_name, status == "success");
                         }
                         let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                         let _ = store.update_last_run(&task_id, None).await;
@@ -274,8 +274,8 @@ impl AppScheduler {
                         Ok(r) => ("success", r.stdout, r.stderr, None),
                         Err(e) => ("failure", None, None, Some(e.to_string())),
                     };
-                    if notify && status == "success" {
-                        send_run_notification(&app_handle, &task_name);
+                    if notify {
+                        send_run_notification(&app_handle, &task_name, status == "success");
                     }
                     let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
                     let _ = store.update_last_run(&task_id, None).await;
@@ -294,12 +294,17 @@ impl AppScheduler {
     }
 }
 
-fn send_run_notification(app: &tauri::AppHandle, task_name: &str) {
+fn send_run_notification(app: &tauri::AppHandle, task_name: &str, success: bool) {
+    let body = if success {
+        format!("Executed: {}", task_name)
+    } else {
+        format!("Failed: {}", task_name)
+    };
     let _ = app
         .notification()
         .builder()
         .title("cronmac")
-        .body(&format!("Executed: {}", task_name))
+        .body(&body)
         .show();
 }
 
