@@ -59,9 +59,9 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     if (schedule.type === 'OneShot' && isNaN(new Date(schedule.run_at).getTime())) { setError('Invalid date'); return; }
     if (action.type === 'OpenFile' && !action.path?.trim()) { setError('File path is required'); return; }
     if (action.type === 'OpenUrl' && !action.url?.trim()) { setError('URL is required'); return; }
+    if (action.type === 'OpenApp' && !action.app_path?.trim()) { setError('Application path is required'); return; }
     if (action.type === 'RunCommand' && !action.command?.trim()) { setError('Command is required'); return; }
     if (action.type === 'Notify' && !action.title?.trim()) { setError('Notification title is required'); return; }
-    if (action.type === 'Shortcut' && action.keys.length === 0) { setError('At least one key is required'); return; }
     if (action.type === 'Webhook' && !action.url?.trim()) { setError('Webhook URL is required'); return; }
 
     setSaving(true);
