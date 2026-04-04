@@ -91,6 +91,7 @@ pub fn run() {
             commands::run_task_now,
             commands::list_logs,
             commands::list_browsers,
+            commands::list_apps_for_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

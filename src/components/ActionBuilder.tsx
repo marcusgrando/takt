@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, FolderOpen } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { type Action, type Shell, type HttpMethod, type KeyCombo, type Modifier, listBrowsers } from '@/lib/api';
+import { type Action, type Shell, type HttpMethod, type KeyCombo, type Modifier, listBrowsers, listAppsForFile } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -147,10 +147,21 @@ async function pickApp(): Promise<string | null> {
 
 export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
   const [browsers, setBrowsers] = useState<string[]>([]);
+  const [fileApps, setFileApps] = useState<string[]>([]);
 
   useEffect(() => {
     listBrowsers().then(setBrowsers).catch(() => {});
   }, []);
+
+  // Refresh compatible apps when file path changes
+  const filePath = value.type === 'OpenFile' ? value.path : '';
+  useEffect(() => {
+    if (filePath) {
+      listAppsForFile(filePath).then(setFileApps).catch(() => setFileApps([]));
+    } else {
+      setFileApps([]);
+    }
+  }, [filePath]);
 
   function handleTypeChange(v: string) {
     onChange(defaultAction(v as Action['type']));
@@ -193,21 +204,22 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Open with app <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Label>Open with <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <div className="flex gap-2">
-              <Input
-                value={value.app ?? ''}
-                onChange={(e) => onChange({ ...value, app: e.target.value || undefined })}
-                placeholder="Default app"
-                className="flex-1"
-              />
+              <Select value={value.app ?? '__default__'} onValueChange={(v) => onChange({ ...value, app: v === '__default__' ? undefined : v })}>
+                <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default app</SelectItem>
+                  {fileApps.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                </SelectContent>
+              </Select>
               <Button variant="outline" size="sm" onClick={async () => {
                 const path = await pickApp();
                 if (path) {
                   const name = path.split('/').pop()?.replace('.app', '') || path;
                   onChange({ ...value, app: name });
                 }
-              }}>
+              }} title="Choose other app…">
                 <FolderOpen className="size-4" />
               </Button>
             </div>

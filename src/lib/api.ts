@@ -118,3 +118,7 @@ export async function listLogs(params?: {
 export async function listBrowsers(): Promise<string[]> {
   return tauriInvoke<string[]>('list_browsers');
 }
+
+export async function listAppsForFile(path: string): Promise<string[]> {
+  return tauriInvoke<string[]>('list_apps_for_file', { path });
+}

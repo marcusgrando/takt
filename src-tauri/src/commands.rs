@@ -86,14 +86,10 @@ pub async fn list_logs(
         .await.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn list_browsers() -> Vec<String> {
+fn apps_for_url(url: &NSURL) -> Vec<String> {
     let workspace = NSWorkspace::sharedWorkspace();
-    let Some(https_url) = NSURL::URLWithString(&NSString::from_str("https://example.com")) else {
-        return vec![];
-    };
-    let app_urls = workspace.URLsForApplicationsToOpenURL(&https_url);
-    let mut browsers: Vec<String> = Vec::new();
+    let app_urls = workspace.URLsForApplicationsToOpenURL(url);
+    let mut apps: Vec<String> = Vec::new();
 
     for app_url in app_urls.to_vec() {
         if let Some(path) = app_url.path() {
@@ -101,13 +97,27 @@ pub fn list_browsers() -> Vec<String> {
             if let Some(name) = path_str.split('/').last() {
                 let clean = name.trim_end_matches(".app");
                 if !clean.is_empty() {
-                    browsers.push(clean.to_string());
+                    apps.push(clean.to_string());
                 }
             }
         }
     }
 
-    browsers.sort();
-    browsers.dedup();
-    browsers
+    apps.sort();
+    apps.dedup();
+    apps
+}
+
+#[tauri::command]
+pub fn list_browsers() -> Vec<String> {
+    let Some(url) = NSURL::URLWithString(&NSString::from_str("https://example.com")) else {
+        return vec![];
+    };
+    apps_for_url(&url)
+}
+
+#[tauri::command]
+pub fn list_apps_for_file(path: String) -> Vec<String> {
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path));
+    apps_for_url(&url)
 }
