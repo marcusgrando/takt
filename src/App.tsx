@@ -1,97 +1,88 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { Plus, Clock } from 'lucide-react';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { queryClient } from '@/lib';
-import { listTasks } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import TaskList from './components/TaskList';
-import TaskWizard from './components/TaskWizard';
+import TemplateGrid, { type TemplateName } from './components/TemplateGrid';
 import HistoryView from './components/HistoryView';
 
-type View = 'list' | 'add' | 'edit' | 'history';
+type View = 'list' | 'templates' | 'history';
+
+let editorCounter = 0;
+
+async function openEditorWindow(params: { template?: TemplateName; taskId?: string }) {
+  const query = new URLSearchParams();
+  if (params.template) query.set('template', params.template);
+  if (params.taskId) query.set('taskId', params.taskId);
+
+  const label = `editor-${++editorCounter}`;
+  const url = `/src/editor.html?${query.toString()}`;
+
+  const win = new WebviewWindow(label, {
+    url,
+    title: params.taskId ? 'Edit Task — cronmac' : 'New Task — cronmac',
+    width: 500,
+    height: 600,
+    resizable: true,
+    center: true,
+    decorations: true,
+  });
+
+  // Refresh task list when editor closes
+  win.once('tauri://destroyed', () => {
+    queryClient.invalidateQueries({ queryKey: ['tasks'] });
+  });
+}
 
 export default function App() {
   const [view, setView] = useState<View>('list');
-  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { data: tasks } = useQuery({
-    queryKey: ['tasks'],
-    queryFn: listTasks,
-    staleTime: 30_000,
-  });
+  function handleTemplateSelect(template: TemplateName) {
+    openEditorWindow({ template });
+    setView('list');
+  }
+
+  function handleEditTask(id: string) {
+    openEditorWindow({ taskId: id });
+  }
 
   return (
-    <div className="flex flex-col h-screen w-full text-foreground select-none bg-transparent">
+    <div className="flex flex-col h-screen w-full bg-background text-foreground select-none overflow-hidden rounded-xl">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 h-10 border-b border-border shrink-0">
+      <div className="flex items-center justify-between px-4 h-12 shrink-0">
         <span className="text-sm font-semibold tracking-tight">cronmac</span>
-        <button
-          onClick={() => setView('add')}
-          className="text-primary text-xl leading-none hover:opacity-70 transition-opacity"
-          title="Add task"
-        >
-          +
-        </button>
+        <Button variant="ghost" size="icon-sm" onClick={() => setView('templates')}>
+          <Plus />
+        </Button>
       </div>
+      <Separator />
 
-      {/* Main content */}
+      {/* Content */}
       <div className="flex-1 overflow-hidden">
         {view === 'list' && (
           <TaskList
-            onEdit={(id) => { setEditingId(id); setView('edit'); }}
-            onAdd={() => setView('add')}
+            onEdit={handleEditTask}
+            onAdd={() => setView('templates')}
           />
         )}
-
-        {view === 'add' && (
-          <TaskWizard
-            onSaved={(_task) => {
-              queryClient.invalidateQueries({ queryKey: ['tasks'] });
-              setView('list');
-            }}
-            onCancel={() => setView('list')}
+        {view === 'templates' && (
+          <TemplateGrid
+            onSelect={handleTemplateSelect}
+            onBack={() => setView('list')}
           />
         )}
-
-        {view === 'edit' && (() => {
-          const editTask = tasks?.find((t) => t.id === editingId);
-          if (!editTask) {
-            return (
-              <div className="flex flex-col items-center justify-center h-full gap-2">
-                <div className="text-sm text-muted-foreground">Loading…</div>
-                <button
-                  type="button"
-                  onClick={() => { setEditingId(null); setView('list'); }}
-                  className="text-xs text-muted-foreground hover:text-foreground underline"
-                >
-                  Cancel
-                </button>
-              </div>
-            );
-          }
-          return (
-            <TaskWizard
-              initialTask={editTask}
-              onSaved={(_task) => {
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                setView('list');
-              }}
-              onCancel={() => setView('list')}
-            />
-          );
-        })()}
-
-        {view === 'history' && (
-          <HistoryView onBack={() => setView('list')} />
-        )}
+        {view === 'history' && <HistoryView onBack={() => setView('list')} />}
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-end px-3 h-8 border-t shrink-0">
-        <button
-          onClick={() => setView('history')}
-          className="text-[11px] text-primary hover:opacity-70 transition-opacity"
-        >
+      <Separator />
+      <div className="flex items-center justify-end px-4 h-10 shrink-0">
+        <Button variant="ghost" size="sm" onClick={() => setView('history')} className="text-muted-foreground">
+          <Clock />
           History
-        </button>
+        </Button>
       </div>
     </div>
   );
