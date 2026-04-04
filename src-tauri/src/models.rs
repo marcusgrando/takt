@@ -39,14 +39,35 @@ pub enum Schedule {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Modifier {
+    Cmd,
+    Shift,
+    Opt,
+    Ctrl,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyCombo {
+    pub modifiers: Vec<Modifier>,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Action {
     OpenFile {
         path: String,
+        app: Option<String>,
+        post_shortcuts: Vec<KeyCombo>,
     },
     OpenUrl {
         url: String,
         browser: Option<String>,
+        post_shortcuts: Vec<KeyCombo>,
+    },
+    OpenApp {
+        app_path: String,
+        post_shortcuts: Vec<KeyCombo>,
     },
     RunCommand {
         command: String,
@@ -57,9 +78,6 @@ pub enum Action {
         title: String,
         body: String,
         sound: bool,
-    },
-    Shortcut {
-        keys: Vec<String>,
     },
     Webhook {
         url: String,
