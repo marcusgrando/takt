@@ -84,10 +84,9 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     setDeleting(true);
     try {
       await deleteTask(task.id);
-      onSaved?.();
+      await onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
       setDeleting(false);
       setConfirmDelete(false);
     }
@@ -105,7 +104,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
       </div>
 
       {/* Scrollable form */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 scrollbar-none">
+      <div className="flex-1 overflow-y-auto px-5 py-5 pb-10 space-y-6 scrollbar-none">
         {/* Name */}
         <div className="space-y-2">
           <Label htmlFor="task-name">Name</Label>
