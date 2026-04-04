@@ -37,6 +37,7 @@ export interface TaskDto {
   name: string;
   description?: string;
   enabled: boolean;
+  run_if_missed: boolean;
   schedule: Schedule;
   action: Action;
   created_at: string;
@@ -92,6 +93,7 @@ export async function updateTask(params: {
   name?: string;
   description?: string | null; // null = clear, undefined = no change
   enabled?: boolean;
+  run_if_missed?: boolean;
   schedule?: Schedule;
   action?: Action;
 }): Promise<TaskDto> {

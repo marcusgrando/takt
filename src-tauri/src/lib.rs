@@ -33,7 +33,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // Build the popover window — opaque white, no decorations
+            // Build the popover window — transparent for rounded CSS corners
             let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
                     .title("cronmac")
@@ -41,6 +41,7 @@ pub fn run() {
                     .resizable(false)
                     .decorations(false)
                     .shadow(true)
+                    .transparent(true)
                     .always_on_top(true)
                     .visible(false)
                     .skip_taskbar(true)

@@ -164,12 +164,12 @@ async fn wait_and_send_shortcuts(shortcuts: &[KeyCombo], delay_secs: u64) -> Res
         ));
     }
 
-    // Wait for the target app/page to load before sending shortcuts
-    tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+    let delay = Duration::from_secs(delay_secs);
 
+    // Wait after the action (app/page load), then between each shortcut
     for combo in shortcuts {
+        tokio::time::sleep(delay).await;
         send_key_combo(combo)?;
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     Ok(())
 }

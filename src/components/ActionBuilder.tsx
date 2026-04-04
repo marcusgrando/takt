@@ -63,9 +63,9 @@ const SYSTEM_SETTINGS_PRESETS: { label: string; url: string }[] = [
 
 function defaultAction(type: Action['type']): Action {
   switch (type) {
-    case 'OpenFile': return { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [], shortcut_delay_secs: 2 };
-    case 'OpenUrl': return { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [], shortcut_delay_secs: 2 };
-    case 'OpenApp': return { type: 'OpenApp', app_path: '', post_shortcuts: [], shortcut_delay_secs: 2 };
+    case 'OpenFile': return { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [], shortcut_delay_secs: 1 };
+    case 'OpenUrl': return { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [], shortcut_delay_secs: 1 };
+    case 'OpenApp': return { type: 'OpenApp', app_path: '', post_shortcuts: [], shortcut_delay_secs: 1 };
     case 'RunCommand': return { type: 'RunCommand', command: '', args: [], shell: 'Zsh' };
     case 'Notify': return { type: 'Notify', title: '', body: '', sound: true };
     case 'Webhook': return { type: 'Webhook', url: '', method: 'GET', headers: {}, body: undefined };
@@ -189,7 +189,7 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
 
   const hasPostShortcuts = value.type === 'OpenFile' || value.type === 'OpenUrl' || value.type === 'OpenApp';
   const postShortcuts = hasPostShortcuts ? (value as { post_shortcuts: KeyCombo[]; shortcut_delay_secs: number }).post_shortcuts : [];
-  const shortcutDelay = hasPostShortcuts ? (value as { shortcut_delay_secs: number }).shortcut_delay_secs : 2;
+  const shortcutDelay = hasPostShortcuts ? (value as { shortcut_delay_secs: number }).shortcut_delay_secs : 1;
 
   function handleShortcutsChange(shortcuts: KeyCombo[]) {
     onChange({ ...value, post_shortcuts: shortcuts } as Action);
@@ -202,9 +202,9 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
   return (
     <div className="space-y-4">
       <Tabs value={value.type} onValueChange={handleTypeChange}>
-        <TabsList className="w-full grid grid-cols-4 h-auto gap-0 p-1">
+        <TabsList className="w-full grid grid-cols-4 gap-0.5 p-1" style={{ height: 'auto' }}>
           {ACTION_TYPES.map(({ type, label }) => (
-            <TabsTrigger key={type} value={type}>{label}</TabsTrigger>
+            <TabsTrigger key={type} value={type} className="text-xs px-1 h-8 flex-none">{label}</TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
@@ -380,7 +380,7 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
                 onChange={(e) => handleDelayChange(Number(e.target.value))}
                 className="w-16 text-center"
               />
-              <span className="text-xs text-muted-foreground">seconds before shortcuts</span>
+              <span className="text-xs text-muted-foreground">seconds between each step</span>
             </div>
           )}
         </>

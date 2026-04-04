@@ -10,6 +10,7 @@
     "core:default",
     "core:window:allow-create",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:webview:allow-create-webview-window",
     "dialog:default",
     "opener:default",

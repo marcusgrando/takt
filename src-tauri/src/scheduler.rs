@@ -1,6 +1,7 @@
 use crate::executor::{current_executor, ActionExecutor};
 use crate::models::{Schedule, TaskDto};
 use crate::store::TaskStore;
+use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -13,6 +14,31 @@ fn normalize_cron(expr: &str) -> String {
         format!("0 {}", expr.trim())
     } else {
         expr.trim().to_string()
+    }
+}
+
+/// Check if a cron task missed an execution while the system was asleep/off.
+/// Returns true if there was a scheduled tick between `last_run_at` and now.
+fn missed_cron_run(expression: &str, last_run_at: Option<&str>) -> bool {
+    let last_run = match last_run_at {
+        Some(s) => match DateTime::parse_from_rfc3339(s) {
+            Ok(dt) => dt.with_timezone(&Local),
+            Err(_) => return false,
+        },
+        None => return true, // never ran — consider missed
+    };
+
+    let expr = normalize_cron(expression);
+    let cron = match croner::Cron::new(&expr).parse() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    // Find the next tick after last_run; if it's before now, we missed it
+    if let Ok(next) = cron.find_next_occurrence(&last_run, false) {
+        next < Local::now()
+    } else {
+        false
     }
 }
 
@@ -42,12 +68,56 @@ impl AppScheduler {
 
     pub async fn load_all_tasks(&self) -> anyhow::Result<()> {
         let tasks = self.store.list_tasks().await?;
-        for task in tasks {
+        for task in &tasks {
             if task.enabled {
-                self.schedule_task(&task).await?;
+                self.schedule_task(task).await?;
             }
         }
+        // Run catch-up for missed tasks after scheduling
+        self.catch_up_missed(&tasks).await;
         Ok(())
+    }
+
+    /// Execute any enabled tasks that missed their scheduled run while the system was off.
+    /// Only applies to Cron tasks with `run_if_missed` enabled. Runs once (latest missed).
+    async fn catch_up_missed(&self, tasks: &[TaskDto]) {
+        for task in tasks {
+            if !task.enabled || !task.run_if_missed {
+                continue;
+            }
+            let should_catch_up = match &task.schedule {
+                Schedule::Cron { expression } => {
+                    missed_cron_run(expression, task.last_run_at.as_deref())
+                }
+                Schedule::OneShot { run_at } => {
+                    // If one-shot time has passed and never ran
+                    if task.last_run_at.is_some() {
+                        false
+                    } else if let Ok(dt) = DateTime::parse_from_rfc3339(run_at) {
+                        dt.with_timezone(&Local) < Local::now()
+                    } else {
+                        false
+                    }
+                }
+                Schedule::DailyFirstUse => false, // has its own logic
+            };
+
+            if should_catch_up {
+                let executor = Arc::clone(&self.executor);
+                let store = Arc::clone(&self.store);
+                let task_id = task.id.clone();
+                let action = task.action.clone();
+                tokio::spawn(async move {
+                    let result = executor.execute(&action).await;
+                    let (status, stdout, stderr, error) = match result {
+                        Ok(r) => ("success", r.stdout, r.stderr, None),
+                        Err(e) => ("failure", None, None, Some(e.to_string())),
+                    };
+                    let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
+                    let _ = store.update_last_run(&task_id, None).await;
+                });
+            }
+        }
     }
 
     pub async fn schedule_task(&self, task: &TaskDto) -> anyhow::Result<()> {
@@ -63,7 +133,7 @@ impl AppScheduler {
                 let task_id_for_closure = task_id.clone();
                 let task_id_guard = task_id.clone();
 
-                let job = Job::new_async(expr.as_str(), move |_uuid, _lock| {
+                let job = Job::new_async_tz(expr.as_str(), Local, move |_uuid, _lock| {
                     let action = action.clone();
                     let executor = Arc::clone(&executor);
                     let store = Arc::clone(&store);
@@ -95,8 +165,8 @@ impl AppScheduler {
                 self.job_ids.lock().await.insert(task_id, job_uuid);
             }
             Schedule::OneShot { run_at } => {
-                let run_at: chrono::DateTime<chrono::Utc> = run_at.parse()?;
-                let now = chrono::Utc::now();
+                let run_at: chrono::DateTime<Local> = run_at.parse::<chrono::DateTime<chrono::FixedOffset>>()?.with_timezone(&Local);
+                let now = Local::now();
                 if run_at > now {
                     let delay = (run_at - now).to_std()?;
                     let store_guard = Arc::clone(&store);

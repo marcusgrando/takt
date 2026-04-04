@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 fn default_shortcut_delay() -> u64 {
-    2
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -11,6 +11,7 @@ pub struct Task {
     pub name: String,
     pub description: Option<String>,
     pub enabled: i64,          // SQLite stores booleans as INTEGER (0/1)
+    pub run_if_missed: i64,    // catch-up: run on wake if missed
     pub schedule_json: String, // JSON-serialized Schedule
     pub action_json: String,   // JSON-serialized Action
     pub created_at: String,    // ISO 8601
@@ -25,6 +26,7 @@ pub struct TaskDto {
     pub name: String,
     pub description: Option<String>,
     pub enabled: bool,
+    pub run_if_missed: bool,
     pub schedule: Schedule,
     pub action: Action,
     pub created_at: String,
@@ -138,6 +140,7 @@ impl Task {
             name: self.name.clone(),
             description: self.description.clone(),
             enabled: self.enabled != 0,
+            run_if_missed: self.run_if_missed != 0,
             schedule,
             action,
             created_at: self.created_at.clone(),

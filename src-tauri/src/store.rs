@@ -40,8 +40,8 @@ impl TaskStore {
         let action_json = serde_json::to_string(&action)?;
 
         sqlx::query(
-            "INSERT INTO tasks (id, name, description, enabled, schedule_json, action_json, created_at, updated_at)
-             VALUES (?, ?, ?, 1, ?, ?, ?, ?)"
+            "INSERT INTO tasks (id, name, description, enabled, run_if_missed, schedule_json, action_json, created_at, updated_at)
+             VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&name)
@@ -62,6 +62,7 @@ impl TaskStore {
         name: Option<String>,
         description: Option<Option<String>>,
         enabled: Option<bool>,
+        run_if_missed: Option<bool>,
         schedule: Option<Schedule>,
         action: Option<Action>,
     ) -> anyhow::Result<TaskDto> {
@@ -71,16 +72,18 @@ impl TaskStore {
         let name = name.unwrap_or(existing.name);
         let description = description.unwrap_or(existing.description);
         let enabled = enabled.unwrap_or(existing.enabled);
+        let run_if_missed = run_if_missed.unwrap_or(existing.run_if_missed);
         let schedule = schedule.unwrap_or(existing.schedule);
         let action = action.unwrap_or(existing.action);
         let now = Utc::now().to_rfc3339();
 
         sqlx::query(
-            "UPDATE tasks SET name=?, description=?, enabled=?, schedule_json=?, action_json=?, updated_at=? WHERE id=?"
+            "UPDATE tasks SET name=?, description=?, enabled=?, run_if_missed=?, schedule_json=?, action_json=?, updated_at=? WHERE id=?"
         )
         .bind(&name)
         .bind(&description)
-        .bind(enabled as i64)  // SQLite stores bool as INTEGER
+        .bind(enabled as i64)
+        .bind(run_if_missed as i64)
         .bind(serde_json::to_string(&schedule)?)
         .bind(serde_json::to_string(&action)?)
         .bind(&now)
@@ -214,6 +217,7 @@ mod tests {
             Some("Updated".to_string()),
             None,
             Some(false),
+            None,
             None,
             None,
         ).await.unwrap();

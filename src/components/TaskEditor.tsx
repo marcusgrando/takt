@@ -1,12 +1,15 @@
 // src/components/TaskEditor.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { confirm } from '@tauri-apps/plugin-dialog';
 import { createTask, updateTask, deleteTask, type TaskDto, type Schedule, type Action } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import ScheduleBuilder from './ScheduleBuilder';
 import ActionBuilder from './ActionBuilder';
 import { generateAutoName } from './AutoName';
@@ -35,11 +38,21 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
   const [showDescription, setShowDescription] = useState(!!task?.description);
   const [schedule, setSchedule] = useState<Schedule>(initialSchedule);
   const [action, setAction] = useState<Action>(initialAction);
+  const [runIfMissed, setRunIfMissed] = useState(task?.run_if_missed ?? true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const closingRef = useRef(false);
+
+  // Snapshot initial values for dirty comparison
+  const initialSnapshot = useRef({
+    name: task?.name ?? '',
+    description: task?.description ?? '',
+    schedule: JSON.stringify(initialSchedule),
+    action: JSON.stringify(initialAction),
+    runIfMissed: task?.run_if_missed ?? true,
+  });
 
   // Auto-name generation
   useEffect(() => {
@@ -48,21 +61,54 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     }
   }, [action, schedule, nameManual]);
 
-  // Track changes
-  useEffect(() => {
-    setDirty(true);
-  }, [name, description, schedule, action]);
+  // Compute dirty by comparing current vs initial (no effects needed)
+  const dirty = useMemo(() => {
+    const snap = initialSnapshot.current;
+    const currentName = nameManual ? name : generateAutoName(action, schedule);
+    const initialName = isEdit ? snap.name : generateAutoName(
+      JSON.parse(snap.action) as Action,
+      JSON.parse(snap.schedule) as Schedule,
+    );
+    if (currentName !== initialName) return true;
+    if (description !== snap.description) return true;
+    if (JSON.stringify(schedule) !== snap.schedule) return true;
+    if (JSON.stringify(action) !== snap.action) return true;
+    if (runIfMissed !== snap.runIfMissed) return true;
+    return false;
+  }, [name, nameManual, description, schedule, action, runIfMissed, isEdit]);
 
-  // Warn on close with unsaved changes
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+
+  // ESC closes the editor window (triggers close-requested, so dirty check applies)
   useEffect(() => {
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      if (dirty && !saving && !deleting) {
-        e.preventDefault();
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        getCurrentWebviewWindow().close();
       }
     }
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [dirty, saving, deleting]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Intercept window close — show native confirmation if dirty
+  useEffect(() => {
+    const win = getCurrentWebviewWindow();
+    const unlisten = win.onCloseRequested(async (event) => {
+      if (dirtyRef.current && !closingRef.current) {
+        event.preventDefault();
+        const ok = await confirm('You have unsaved changes. Close without saving?', {
+          title: 'cronmac',
+          kind: 'warning',
+        });
+        if (ok) {
+          closingRef.current = true;
+          await win.destroy();
+        }
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   function handleNameChange(value: string) {
     setNameManual(true);
@@ -84,10 +130,11 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     setSaving(true);
     try {
       if (isEdit) {
-        await updateTask({ id: task!.id, name: name.trim(), description: description.trim() || null, schedule, action });
+        await updateTask({ id: task!.id, name: name.trim(), description: description.trim() || null, run_if_missed: runIfMissed, schedule, action });
       } else {
         await createTask({ name: name.trim(), description: description.trim() || undefined, schedule, action });
       }
+      closingRef.current = true; // allow window to close without prompt
       onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -99,6 +146,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
   async function handleDelete() {
     if (!task) return;
     setDeleting(true);
+    closingRef.current = true;
     try {
       await deleteTask(task.id);
       await onSaved?.();
@@ -106,6 +154,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
       setError(err instanceof Error ? err.message : String(err));
       setDeleting(false);
       setConfirmDelete(false);
+      closingRef.current = false;
     }
   }
 
@@ -155,6 +204,15 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
         <div className="space-y-3">
           <Label className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Schedule</Label>
           <ScheduleBuilder value={schedule} onChange={setSchedule} />
+        </div>
+
+        {/* Run if missed */}
+        <div className="flex items-center justify-between">
+          <div>
+            <Label>Run if missed</Label>
+            <p className="text-xs text-muted-foreground">Execute on wake if a run was missed while inactive</p>
+          </div>
+          <Switch checked={runIfMissed} onCheckedChange={setRunIfMissed} />
         </div>
 
         <Separator />

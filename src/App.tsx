@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Plus, Clock } from 'lucide-react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { invoke } from '@tauri-apps/api/core';
@@ -46,19 +46,6 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
 export default function App() {
   const [view, setView] = useState<View>('list');
 
-  // ESC closes the popover
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
-          getCurrentWebviewWindow().hide();
-        });
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
   function handleTemplateSelect(template: TemplateName) {
     openEditorWindow({ template });
     setView('list');
@@ -69,7 +56,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-background text-foreground select-none overflow-hidden rounded-xl">
+    <div className="flex flex-col h-screen w-full bg-background text-foreground overflow-hidden rounded-2xl shadow-xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 h-12 shrink-0">
         <span className="text-sm font-semibold tracking-tight">cronmac</span>

@@ -4784,6 +4784,7 @@ dependencies = [
  "block2",
  "chrono",
  "core-graphics 0.24.0",
+ "croner",
  "dirs 5.0.1",
  "objc2",
  "objc2-app-kit",
