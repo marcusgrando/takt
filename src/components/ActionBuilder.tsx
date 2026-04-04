@@ -42,6 +42,24 @@ function textToHeaders(text: string): Record<string, string> {
   return result;
 }
 
+const SYSTEM_SETTINGS_PRESETS: { label: string; url: string }[] = [
+  { label: 'General', url: 'x-apple.systempreferences:com.apple.settings.General' },
+  { label: 'Accessibility', url: 'x-apple.systempreferences:com.apple.Accessibility-Settings.extension' },
+  { label: 'Battery', url: 'x-apple.systempreferences:com.apple.settings.Battery' },
+  { label: 'Bluetooth', url: 'x-apple.systempreferences:com.apple.BluetoothSettings' },
+  { label: 'Displays', url: 'x-apple.systempreferences:com.apple.Displays-Settings.extension' },
+  { label: 'Keyboard', url: 'x-apple.systempreferences:com.apple.Keyboard-Settings.extension' },
+  { label: 'Network', url: 'x-apple.systempreferences:com.apple.Network-Settings.extension' },
+  { label: 'Notifications', url: 'x-apple.systempreferences:com.apple.Notifications-Settings.extension' },
+  { label: 'Privacy & Security', url: 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension' },
+  { label: 'Sound', url: 'x-apple.systempreferences:com.apple.Sound-Settings.extension' },
+  { label: 'Software Update', url: 'x-apple.systempreferences:com.apple.Software-Update-Settings.extension' },
+  { label: 'Storage', url: 'x-apple.systempreferences:com.apple.settings.Storage' },
+  { label: 'Time Machine', url: 'x-apple.systempreferences:com.apple.Time-Machine-Settings.extension' },
+  { label: 'Users', url: 'x-apple.systempreferences:com.apple.settings.Users' },
+  { label: 'Wi-Fi', url: 'x-apple.systempreferences:com.apple.wifi-settings-extension' },
+];
+
 function defaultAction(type: Action['type']): Action {
   switch (type) {
     case 'OpenFile': return { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [], shortcut_delay_secs: 2 };
@@ -237,6 +255,16 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
           <div className="space-y-2">
             <Label>URL</Label>
             <Input value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://example.com" />
+          </div>
+          <div className="space-y-2">
+            <Label>Quick fill <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Select value="__none__" onValueChange={(v) => { if (v !== '__none__') onChange({ ...value, url: v }); }}>
+              <SelectTrigger><SelectValue placeholder="System Settings..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__" disabled className="hidden">System Settings...</SelectItem>
+                {SYSTEM_SETTINGS_PRESETS.map((p) => <SelectItem key={p.url} value={p.url}>{p.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Browser <span className="text-muted-foreground font-normal">(optional)</span></Label>

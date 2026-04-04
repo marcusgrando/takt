@@ -107,12 +107,12 @@ fn open_file(path: &str, app: Option<&str>) -> Result<(), ExecutorError> {
 
 fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
     let workspace = NSWorkspace::sharedWorkspace();
-    // Normalize: add https:// if no scheme is present
-    let normalized = if !url.contains("://") {
-        format!("https://{}", url)
-    } else {
-        url.to_string()
-    };
+    // Normalize: add https:// only if no scheme is present at all.
+    // Schemes like x-apple.systempreferences: use ":" without "://".
+    let has_scheme = url.contains("://") || url.split_once(':').map_or(false, |(scheme, _)| {
+        !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+')
+    });
+    let normalized = if has_scheme { url.to_string() } else { format!("https://{}", url) };
     let ns_url = NSURL::URLWithString(&NSString::from_str(&normalized))
         .ok_or_else(|| ExecutorError::CommandFailed(format!("Invalid URL: {}", url)))?;
 
