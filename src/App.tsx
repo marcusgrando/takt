@@ -43,7 +43,7 @@ export default function App() {
         {(view === 'add' || view === 'edit') && (
           <TaskWizard
             initialTask={view === 'edit' ? tasks?.find((t) => t.id === editingId) : undefined}
-            onSaved={() => {
+            onSaved={(_task) => {
               queryClient.invalidateQueries({ queryKey: ['tasks'] });
               setView('list');
             }}
