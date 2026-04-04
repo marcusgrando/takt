@@ -13,7 +13,7 @@ use crate::scheduler::AppScheduler;
 use crate::store::TaskStore;
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
 
@@ -28,27 +28,46 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            // Hide from dock on macOS
+            // Hide from dock — must be set before any window is shown
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // Create the main popover window programmatically
-            let _window =
+            // Build the popover window: transparent so vibrancy shows through
+            let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
                     .title("cronmac")
                     .inner_size(280.0, 400.0)
                     .resizable(false)
                     .decorations(false)
+                    .transparent(true)
+                    .shadow(true)
                     .always_on_top(true)
                     .visible(false)
                     .skip_taskbar(true)
                     .build()?;
 
-            // Register LaunchAgent for auto-start on login (macOS only, bundled .app)
+            // Native macOS frosted-glass popover effect with 12px corner radius
+            #[cfg(target_os = "macos")]
+            window_vibrancy::apply_vibrancy(
+                &window,
+                window_vibrancy::NSVisualEffectMaterial::Popover,
+                None,
+                Some(12.0),
+            )
+            .expect("apply_vibrancy failed");
+
+            // Auto-dismiss: hide the popover when it loses focus (click outside)
+            let window_focus = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Focused(false) = event {
+                    let _ = window_focus.hide();
+                }
+            });
+
+            // Register LaunchAgent for auto-start on login (bundled .app only)
             launch_agent::ensure_registered();
 
-            // Block on async init so AppState is managed before setup() returns.
-            // This guarantees IPC handlers cannot be invoked before state is ready.
+            // Async init — block until AppState is ready before IPC is available
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
                 let pool = crate::db::connect()
@@ -92,12 +111,28 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
     TrayIconBuilder::new()
         .icon(tauri::include_image!("icons/tray-icon.png"))
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: TrayIconEvent| {
-            if let TrayIconEvent::Click { .. } = event {
+        .on_tray_icon_event(|tray, event| {
+            // Only react to left-button release to avoid double-firing (down + up)
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                rect,
+                ..
+            } = event
+            {
                 let app = tray.app_handle();
-                toggle_main_window(app);
+                let (tray_x, tray_y) = match rect.position {
+                    tauri::Position::Physical(p) => (p.x as f64, p.y as f64),
+                    tauri::Position::Logical(p) => (p.x, p.y),
+                };
+                let (tray_w, tray_h) = match rect.size {
+                    tauri::Size::Physical(s) => (s.width as f64, s.height as f64),
+                    tauri::Size::Logical(s) => (s.width, s.height),
+                };
+                show_near_tray(app, tray_x, tray_y, tray_w, tray_h);
             }
         })
         .on_menu_event(|app: &AppHandle, event: tauri::menu::MenuEvent| {
@@ -110,13 +145,27 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn toggle_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
-        } else {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+/// Position the popover window centered below the tray icon and show it.
+/// All coordinates from TrayIconEvent are in physical pixels.
+fn show_near_tray(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h: f64) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    // Toggle: if already visible, hide it
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
     }
+
+    let scale = window.scale_factor().unwrap_or(2.0);
+    let win_w = 280.0 * scale; // window width in physical pixels
+
+    // Center horizontally on the tray icon, place just below it
+    let x = tray_x + (tray_w / 2.0) - (win_w / 2.0);
+    let y = tray_y + tray_h + 4.0 * scale;
+
+    let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+    let _ = window.show();
+    let _ = window.set_focus();
 }

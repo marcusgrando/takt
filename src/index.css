@@ -121,8 +121,10 @@
   * {
     @apply border-border outline-ring/50;
     }
-  body {
-    @apply bg-background text-foreground;
+  html, body {
+    /* Transparent so native macOS vibrancy shows through */
+    background: transparent;
+    @apply text-foreground;
     }
   html {
     @apply font-sans;

@@ -19,7 +19,7 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-screen w-full bg-background text-foreground select-none">
+    <div className="flex flex-col h-screen w-full text-foreground select-none">
       {/* Header */}
       <div className="flex items-center justify-between px-3 h-10 border-b shrink-0">
         <span className="text-sm font-semibold">cronmac</span>
