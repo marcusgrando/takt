@@ -1,6 +1,7 @@
 use crate::models::{Schedule, Action, TaskDto, ExecutionLog};
 use crate::AppState;
 use tauri::{AppHandle, State};
+use tauri_plugin_notification::NotificationExt;
 use objc2_app_kit::NSWorkspace;
 use objc2_foundation::{NSURL, NSString};
 
@@ -61,16 +62,21 @@ pub async fn delete_task(id: String, state: State<'_, AppState>) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn run_task_now(id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn run_task_now(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let task = state.store.get_task(&id).await.map_err(|e| e.to_string())?
         .ok_or_else(|| "Task not found".to_string())?;
-    // NOTE: log_execution records Utc::now() internally for both started_at and
-    // finished_at; timing is approximate (does not capture true execution duration).
     let result = state.executor.execute(&task.action).await;
     let (status, stdout, stderr, error) = match result {
         Ok(r) => (STATUS_SUCCESS, r.stdout, r.stderr, None),
         Err(e) => (STATUS_FAILURE, None, None, Some(e.to_string())),
     };
+    if task.notify_on_run && status == STATUS_SUCCESS {
+        let _ = app.notification()
+            .builder()
+            .title(&task.name)
+            .body("Task executed successfully")
+            .show();
+    }
     state.store.log_execution(&id, status, stdout, stderr, error)
         .await.map_err(|e| e.to_string())?;
     state.store.update_last_run(&id, None)
