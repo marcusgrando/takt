@@ -40,9 +40,8 @@ export default function App() {
           />
         )}
 
-        {(view === 'add' || view === 'edit') && (
+        {view === 'add' && (
           <TaskWizard
-            initialTask={view === 'edit' ? tasks?.find((t) => t.id === editingId) : undefined}
             onSaved={(_task) => {
               queryClient.invalidateQueries({ queryKey: ['tasks'] });
               setView('list');
@@ -50,6 +49,27 @@ export default function App() {
             onCancel={() => setView('list')}
           />
         )}
+
+        {view === 'edit' && (() => {
+          const editTask = tasks?.find((t) => t.id === editingId);
+          if (!editTask) {
+            return (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-sm text-muted-foreground">Loading…</div>
+              </div>
+            );
+          }
+          return (
+            <TaskWizard
+              initialTask={editTask}
+              onSaved={(_task) => {
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                setView('list');
+              }}
+              onCancel={() => setView('list')}
+            />
+          );
+        })()}
 
         {view === 'history' && (
           <div className="p-4">

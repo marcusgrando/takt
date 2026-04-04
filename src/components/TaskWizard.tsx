@@ -38,6 +38,31 @@ export default function TaskWizard({ initialTask, onSaved, onCancel }: TaskWizar
 
   async function handleSave() {
     setSaveError(null);
+
+    // Validate schedule
+    if (schedule.type === 'Cron' && !schedule.expression.trim()) {
+      setSaveError('Cron expression cannot be empty');
+      return;
+    }
+
+    // Validate action
+    if (action.type === 'OpenFile' && !(action.path?.trim())) {
+      setSaveError('File path cannot be empty');
+      return;
+    }
+    if (action.type === 'OpenUrl' && !(action.url?.trim())) {
+      setSaveError('URL cannot be empty');
+      return;
+    }
+    if (action.type === 'RunCommand' && !(action.command?.trim())) {
+      setSaveError('Command cannot be empty');
+      return;
+    }
+    if (action.type === 'Webhook' && !(action.url?.trim())) {
+      setSaveError('Webhook URL cannot be empty');
+      return;
+    }
+
     setSaving(true);
     try {
       let saved: TaskDto;

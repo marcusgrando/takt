@@ -160,22 +160,20 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="rc-args" className="text-xs text-muted-foreground">
-              Args <span className="opacity-50">(comma-separated)</span>
+              Arguments <span className="opacity-50">(one per line)</span>
             </Label>
-            <Input
+            <Textarea
               id="rc-args"
-              value={value.args.join(', ')}
+              value={value.args.join('\n')}
               onChange={(e) =>
                 onChange({
                   ...value,
-                  args: e.target.value
-                    .split(',')
-                    .map((a) => a.trim())
-                    .filter(Boolean),
+                  args: e.target.value.split('\n').map((a) => a.trim()).filter(Boolean),
                 })
               }
-              placeholder="--flag, value"
-              className="h-7 text-xs font-mono"
+              placeholder={"--flag\nvalue"}
+              className="min-h-14 text-xs font-mono resize-none"
+              rows={3}
             />
           </div>
         </div>

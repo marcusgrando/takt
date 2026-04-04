@@ -23,6 +23,14 @@ function exprToPreset(expr: string): CronPreset {
   return match ? match.id : 'custom';
 }
 
+/** Convert an ISO 8601 string to the "YYYY-MM-DDTHH:MM" format required by datetime-local inputs. */
+function toDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const SCHEDULE_TYPES: { type: Schedule['type']; label: string }[] = [
   { type: 'Cron',    label: 'Recurring' },
   { type: 'OneShot', label: 'One time' },
@@ -37,12 +45,8 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
         onChange({ type: 'Cron', expression: '0 * * * *' });
         break;
       case 'OneShot': {
-        // default to now + 1 hour, formatted for datetime-local
-        const d = new Date(Date.now() + 3_600_000);
-        const local = new Date(d.getTime() - d.getTimezoneOffset() * 60_000)
-          .toISOString()
-          .slice(0, 16);
-        onChange({ type: 'OneShot', run_at: local });
+        // default to now + 1 hour, stored as ISO 8601
+        onChange({ type: 'OneShot', run_at: new Date(Date.now() + 3_600_000).toISOString() });
         break;
       }
       case 'OnLogin':
@@ -134,8 +138,8 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
           <Input
             id="run-at"
             type="datetime-local"
-            value={value.run_at}
-            onChange={(e) => onChange({ type: 'OneShot', run_at: e.target.value })}
+            value={toDatetimeLocal(value.run_at)}
+            onChange={(e) => onChange({ type: 'OneShot', run_at: new Date(e.target.value).toISOString() })}
             className="h-7 text-xs"
           />
         </div>
