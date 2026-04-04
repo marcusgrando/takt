@@ -45,7 +45,7 @@ export default function TaskWizard({ initialTask, onSaved, onCancel }: TaskWizar
       return;
     }
     if (schedule.type === 'OneShot') {
-      const d = new Date((schedule as { type: 'OneShot'; run_at: string }).run_at ?? '');
+      const d = new Date(schedule.run_at);
       if (isNaN(d.getTime())) {
         setSaveError('Please set a valid date and time');
         return;

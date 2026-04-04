@@ -139,7 +139,10 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
             id="run-at"
             type="datetime-local"
             value={toDatetimeLocal(value.run_at)}
-            onChange={(e) => onChange({ type: 'OneShot', run_at: new Date(e.target.value).toISOString() })}
+            onChange={(e) => {
+              const iso = e.target.value ? new Date(e.target.value).toISOString() : '';
+              onChange({ type: 'OneShot', run_at: iso });
+            }}
             className="h-7 text-xs"
           />
         </div>

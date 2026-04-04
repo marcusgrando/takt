@@ -57,7 +57,8 @@ export default function App() {
               <div className="flex flex-col items-center justify-center h-full gap-2">
                 <div className="text-sm text-muted-foreground">Loading…</div>
                 <button
-                  onClick={() => setView('list')}
+                  type="button"
+                  onClick={() => { setEditingId(null); setView('list'); }}
                   className="text-xs text-muted-foreground hover:text-foreground underline"
                 >
                   Cancel
