@@ -204,6 +204,35 @@ if let Some(task) = task {
 
 This ensures that even if a task was enabled when scheduled, disabling it in the UI prevents the next execution.
 
+Additionally, when a task is toggled off, the scheduler should remove the job from tokio-cron-scheduler so it stops firing entirely (not just skip on each tick). Add a `remove_task(task_id)` method to `AppScheduler` that calls `scheduler.remove()` with the stored job UUID. The scheduler needs to maintain a `HashMap<String, Uuid>` mapping task IDs to job UUIDs.
+
+When toggled back on, re-schedule the task via the existing `schedule_task()`.
+
+**Bug 3: Deleted task still executes**
+
+Same root cause as Bug 1. The `delete_task` command in `commands.rs` has a NOTE saying `remove_task is a no-op stub`. The fix:
+1. The scheduler's `remove_task()` method (added for Bug 1) also handles this case
+2. In `commands.rs`, call `scheduler.remove_task(&id)` before `store.delete_task(&id)`
+3. The re-fetch check in the job closure (Bug 1 fix) also guards against this: if `get_task` returns `None` (deleted), skip execution and don't log
+
+Updated job closure logic:
+```rust
+let task = store.get_task(&task_id).await;
+match task {
+    Some(task) if task.enabled => {
+        // proceed with execution
+    }
+    Some(_) => {
+        // disabled — log as skipped
+        store.log_execution(&task_id, "skipped", None, None, None).await;
+    }
+    None => {
+        // deleted — silently skip, no log
+        return;
+    }
+}
+```
+
 **Bug 2: window.close not allowed**
 
 Add `core:window:allow-close` to `src-tauri/capabilities/default.json`:
