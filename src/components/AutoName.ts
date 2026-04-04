@@ -1,4 +1,5 @@
 import type { Action, Schedule } from '@/lib/api';
+import { parseCron } from './schedule/cron-utils';
 
 function describeAction(action: Action): string {
   switch (action.type) {
@@ -40,12 +41,15 @@ function describeAction(action: Action): string {
       }
     }
     case 'Settings': {
-      // Extract label from pane_url
       const id = action.pane_url.split(':')[1] ?? '';
       const name = id.split('.').pop()?.replace('-Settings', '').replace('.extension', '').replace('-', ' ') || 'Settings';
       return `Open ${name}`;
     }
   }
+}
+
+function formatTime(hour: number, minute: number): string {
+  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
 }
 
 function describeSchedule(schedule: Schedule): string {
@@ -57,16 +61,31 @@ function describeSchedule(schedule: Schedule): string {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     }
     case 'Cron': {
-      const expr = schedule.expression;
-      const presets: Record<string, string> = {
-        '* * * * *': 'Every minute',
-        '*/5 * * * *': 'Every 5 min',
-        '0 * * * *': 'Every hour',
-        '0 0 * * *': 'Daily midnight',
-        '0 9 * * *': 'Daily 9am',
-        '0 0 * * 1': 'Weekly Monday',
-      };
-      return presets[expr] ?? `Cron ${expr}`;
+      const state = parseCron(schedule.expression);
+      switch (state.frequency) {
+        case 'hourly':
+          return state.intervalUnit === 'minutes'
+            ? `Every ${state.intervalValue} min`
+            : `Every ${state.intervalValue} hour${state.intervalValue > 1 ? 's' : ''}`;
+        case 'daily':
+          return state.dailyInterval === 1
+            ? `Daily at ${formatTime(state.hour, state.minute)}`
+            : `Every ${state.dailyInterval} days at ${formatTime(state.hour, state.minute)}`;
+        case 'weekly': {
+          const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          const days = state.weekdays.sort((a, b) => a - b).map((d) => dayNames[d]).join(', ');
+          return `${days} at ${formatTime(state.hour, state.minute)}`;
+        }
+        case 'monthly': {
+          if (state.monthlyMode === 'each') {
+            const days = state.monthDays.sort((a, b) => a - b).join(', ');
+            return `Monthly on ${days} at ${formatTime(state.hour, state.minute)}`;
+          }
+          return `Monthly ${state.ordinalPosition} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][state.ordinalWeekday]} at ${formatTime(state.hour, state.minute)}`;
+        }
+        case 'custom':
+          return `Cron ${schedule.expression}`;
+      }
     }
   }
 }
