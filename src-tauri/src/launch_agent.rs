@@ -1,9 +1,13 @@
 use std::path::{Path, PathBuf};
 
-pub fn launch_agent_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap()
-        .join("Library/LaunchAgents/com.cronmac.app.plist")
+pub fn launch_agent_path() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join("Library/LaunchAgents/com.cronmac.app.plist"))
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub fn app_bundle_path() -> Option<PathBuf> {
@@ -33,7 +37,7 @@ pub fn plist_content(app_path: &Path) -> String {
     <false/>
 </dict>
 </plist>"#,
-        app_path.display()
+        xml_escape(&app_path.display().to_string())
     )
 }
 
@@ -42,16 +46,18 @@ pub fn ensure_registered() {
     let Some(app_path) = app_bundle_path() else {
         return;
     };
-    let plist_path = launch_agent_path();
+    let Some(plist_path) = launch_agent_path() else {
+        return;
+    };
     if plist_path.exists() {
         return;
     } // already registered
     if let Some(parent) = plist_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&plist_path, plist_content(&app_path));
-    // Load it
-    let _ = std::process::Command::new("launchctl")
-        .args(["load", plist_path.to_str().unwrap()])
-        .status();
+    if std::fs::write(&plist_path, plist_content(&app_path)).is_ok() {
+        let _ = std::process::Command::new("launchctl")
+            .args(["load", plist_path.to_str().unwrap_or_default()])
+            .status();
+    }
 }
