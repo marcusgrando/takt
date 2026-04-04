@@ -12,56 +12,35 @@ interface TaskItemProps {
   onDeleted: () => void;
 }
 
-function getActionLabel(action: Action): string {
-  switch (action.type) {
-    case 'RunCommand':
-      return 'shell';
-    case 'OpenUrl':
-      return 'url';
-    case 'Notify':
-      return 'notify';
-    case 'OpenFile':
-      return 'file';
-    case 'Shortcut':
-      return 'shortcut';
-    case 'Webhook':
-      return 'webhook';
-    default:
-      (action as never) satisfies never;
-      return 'unknown';
-  }
+function actionLabel(action: Action): string {
+  const map: Record<Action['type'], string> = {
+    RunCommand: 'shell', OpenUrl: 'url', Notify: 'notify',
+    OpenFile: 'file', Shortcut: 'shortcut', Webhook: 'webhook',
+  };
+  return map[action.type] ?? 'unknown';
 }
 
-function getActionBadgeClass(action: Action): string {
-  switch (action.type) {
-    case 'OpenUrl':
-      return 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-transparent';
-    case 'RunCommand':
-      return 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-transparent';
-    case 'Notify':
-      return 'bg-orange-500/15 text-orange-700 dark:text-orange-400 border-transparent';
-    case 'OpenFile':
-      return 'bg-green-500/15 text-green-700 dark:text-green-400 border-transparent';
-    case 'Shortcut':
-      return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-transparent';
-    case 'Webhook':
-      return 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-transparent';
-    default:
-      (action as never) satisfies never;
-      return 'border-transparent';
-  }
+function actionBadgeClass(action: Action): string {
+  const map: Record<Action['type'], string> = {
+    OpenUrl:    'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-transparent',
+    RunCommand: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-transparent',
+    Notify:     'bg-orange-500/15 text-orange-700 dark:text-orange-400 border-transparent',
+    OpenFile:   'bg-green-500/15 text-green-700 dark:text-green-400 border-transparent',
+    Shortcut:   'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-transparent',
+    Webhook:    'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-transparent',
+  };
+  return map[action.type] ?? 'border-transparent';
 }
 
 export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [opError, setOpError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleToggle(checked: boolean) {
     if (isToggling) return;
-    // Optimistic update
     queryClient.setQueryData<TaskDto[]>(['tasks'], (prev) =>
       prev?.map((t) => t.id === task.id ? { ...t, enabled: checked } : t) ?? []
     );
@@ -70,11 +49,10 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
       await updateTask({ id: task.id, enabled: checked });
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     } catch (err) {
-      // Revert on failure
       queryClient.setQueryData<TaskDto[]>(['tasks'], (prev) =>
         prev?.map((t) => t.id === task.id ? { ...t, enabled: task.enabled } : t) ?? []
       );
-      setOpError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsToggling(false);
     }
@@ -82,102 +60,55 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
 
   async function handleRun() {
     if (isRunning) return;
-    setOpError(null);
+    setError(null);
     setIsRunning(true);
-    try {
-      await runTaskNow(task.id);
-    } catch (err) {
-      setOpError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsRunning(false);
-    }
+    try { await runTaskNow(task.id); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setIsRunning(false); }
   }
 
-  async function handleDeleteConfirmed() {
+  async function handleDelete() {
     setIsDeleting(true);
-    setConfirmingDelete(false);
-    try {
-      await deleteTask(task.id);
-      setIsDeleting(false);
-      onDeleted();
-    } catch (err) {
-      setOpError(err instanceof Error ? err.message : String(err));
-      setIsDeleting(false);
-    }
+    setConfirmDelete(false);
+    try { await deleteTask(task.id); onDeleted(); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setIsDeleting(false); }
   }
 
   return (
-    <div className="flex flex-col px-3 py-2 hover:bg-muted/50 group">
-      <div className="flex items-center gap-2">
-        {/* Status dot */}
-        <span
-          className={task.enabled
-            ? 'size-1.5 rounded-full bg-green-500 shrink-0'
-            : 'size-1.5 rounded-full bg-muted-foreground/40 shrink-0'}
-        />
+    <div className="group flex flex-col gap-2 px-4 py-3 hover:bg-muted/50 transition-colors">
+      <div className="flex items-center gap-3">
+        {/* Status indicator */}
+        <div className={`size-2 rounded-full shrink-0 ${task.enabled ? 'bg-green-500' : 'bg-muted-foreground/25'}`} />
 
-        {/* Toggle */}
+        {/* Switch */}
         <Switch
           checked={task.enabled}
           onCheckedChange={handleToggle}
           disabled={isToggling}
-          size="sm"
           aria-label={`Toggle ${task.name}`}
         />
 
-        {/* Name + badge */}
-        <div className="flex flex-col min-w-0 flex-1">
-          <span
-            className="text-xs font-medium truncate leading-tight"
-            title={task.name}
-          >
-            {task.name}
-          </span>
-          <Badge
-            variant="secondary"
-            className={`mt-0.5 w-fit text-[10px] h-4 px-1.5 ${getActionBadgeClass(task.action)}`}
-          >
-            {getActionLabel(task.action)}
+        {/* Name + type badge */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span className="text-sm font-medium truncate">{task.name}</span>
+          <Badge variant="secondary" className={actionBadgeClass(task.action)}>
+            {actionLabel(task.action)}
           </Badge>
         </div>
 
-        {/* Actions — visible on hover or keyboard focus within */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-          {/* Play */}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={handleRun}
-            disabled={isRunning}
-            title="Run now"
-            aria-label="Run task now"
-          >
-            {isRunning ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <Play />
-            )}
+        {/* Hover actions */}
+        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <Button variant="ghost" size="icon-sm" onClick={handleRun} disabled={isRunning} title="Run now">
+            {isRunning ? <Loader2 className="animate-spin" /> : <Play />}
           </Button>
-
-          {/* Edit */}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => onEdit(task.id)}
-            title="Edit task"
-            aria-label="Edit task"
-          >
+          <Button variant="ghost" size="icon-sm" onClick={() => onEdit(task.id)} title="Edit">
             <Pencil />
           </Button>
-
-          {/* Delete */}
           <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => setConfirmingDelete(true)}
-            disabled={isDeleting}
-            title="Delete task"
-            aria-label="Delete task"
+            variant="ghost" size="icon-sm"
+            onClick={() => setConfirmDelete(true)}
+            disabled={isDeleting} title="Delete"
             className="text-destructive hover:text-destructive hover:bg-destructive/10"
           >
             {isDeleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
@@ -185,43 +116,18 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
         </div>
       </div>
 
-      {/* Inline delete confirmation */}
-      {confirmingDelete && (
-        <div className="flex items-center justify-between mt-1.5 px-1 py-1 rounded bg-destructive/10 text-xs">
-          <span className="text-destructive">Delete this task?</span>
-          <div className="flex gap-1">
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => setConfirmingDelete(false)}
-              className="h-5 px-2 text-xs"
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              size="xs"
-              onClick={handleDeleteConfirmed}
-              className="h-5 px-2 text-xs"
-            >
-              Delete
-            </Button>
+      {confirmDelete && (
+        <div className="flex items-center justify-between rounded-md bg-destructive/10 px-3 py-2 text-sm">
+          <span className="text-destructive font-medium">Delete?</span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="xs" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            <Button variant="destructive" size="xs" onClick={handleDelete}>Delete</Button>
           </div>
         </div>
       )}
 
-      {/* Inline error message */}
-      {opError && (
-        <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-destructive">
-          <span className="truncate">{opError}</span>
-          <button
-            onClick={() => setOpError(null)}
-            className="ml-1 shrink-0 opacity-60 hover:opacity-100"
-            aria-label="Dismiss error"
-          >
-            ✕
-          </button>
-        </div>
+      {error && (
+        <p className="text-xs text-destructive px-1">{error}</p>
       )}
     </div>
   );

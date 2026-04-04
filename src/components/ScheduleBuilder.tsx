@@ -1,6 +1,8 @@
 import { type Schedule } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface ScheduleBuilderProps {
   value: Schedule;
@@ -19,11 +21,9 @@ const CRON_PRESETS: { id: CronPreset; label: string; expr: string }[] = [
 ];
 
 function exprToPreset(expr: string): CronPreset {
-  const match = CRON_PRESETS.find((p) => p.id !== 'custom' && p.expr === expr);
-  return match ? match.id : 'custom';
+  return CRON_PRESETS.find((p) => p.id !== 'custom' && p.expr === expr)?.id ?? 'custom';
 }
 
-/** Convert an ISO 8601 string to the "YYYY-MM-DDTHH:MM" format required by datetime-local inputs. */
 function toDatetimeLocal(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
@@ -39,121 +39,70 @@ const SCHEDULE_TYPES: { type: Schedule['type']; label: string }[] = [
 ];
 
 export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
-  function handleTypeChange(type: Schedule['type']) {
+  function handleTypeChange(v: string) {
+    const type = v as Schedule['type'];
     switch (type) {
-      case 'Cron':
-        onChange({ type: 'Cron', expression: '0 * * * *' });
-        break;
-      case 'OneShot': {
-        // default to now + 1 hour, stored as ISO 8601
-        onChange({ type: 'OneShot', run_at: new Date(Date.now() + 3_600_000).toISOString() });
-        break;
-      }
-      case 'OnLogin':
-        onChange({ type: 'OnLogin' });
-        break;
-      case 'OnWake':
-        onChange({ type: 'OnWake' });
-        break;
+      case 'Cron': onChange({ type: 'Cron', expression: '0 * * * *' }); break;
+      case 'OneShot': onChange({ type: 'OneShot', run_at: new Date(Date.now() + 3_600_000).toISOString() }); break;
+      case 'OnLogin': onChange({ type: 'OnLogin' }); break;
+      case 'OnWake': onChange({ type: 'OnWake' }); break;
     }
   }
 
   function handlePresetChange(preset: CronPreset) {
     if (value.type !== 'Cron') return;
-    if (preset === 'custom') {
-      onChange({ type: 'Cron', expression: '' });
-    } else {
-      const p = CRON_PRESETS.find((p) => p.id === preset)!;
-      onChange({ type: 'Cron', expression: p.expr });
-    }
+    onChange({ type: 'Cron', expression: preset === 'custom' ? '' : CRON_PRESETS.find((p) => p.id === preset)!.expr });
   }
 
   const activePreset = value.type === 'Cron' ? exprToPreset(value.expression) : null;
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Type selector */}
-      <div className="flex gap-1 rounded-lg bg-muted p-0.5">
-        {SCHEDULE_TYPES.map(({ type, label }) => (
-          <button
-            key={type}
-            type="button"
-            onClick={() => handleTypeChange(type)}
-            className={[
-              'flex-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors',
-              value.type === type
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground',
-            ].join(' ')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-4">
+      {/* Schedule type — shadcn Tabs */}
+      <Tabs value={value.type} onValueChange={handleTypeChange}>
+        <TabsList className="w-full">
+          {SCHEDULE_TYPES.map(({ type, label }) => (
+            <TabsTrigger key={type} value={type}>{label}</TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      {/* Cron — frequency presets */}
       {value.type === 'Cron' && (
-        <div className="flex flex-col gap-2">
-          <Label className="text-xs text-muted-foreground">Frequency</Label>
-          <div className="grid grid-cols-3 gap-1">
+        <div className="space-y-3">
+          <Label>Frequency</Label>
+          <div className="grid grid-cols-3 gap-2">
             {CRON_PRESETS.map((preset) => (
-              <button
+              <Button
                 key={preset.id}
                 type="button"
+                variant={activePreset === preset.id ? 'default' : 'outline'}
+                size="sm"
                 onClick={() => handlePresetChange(preset.id)}
-                className={[
-                  'rounded-md border px-2 py-1 text-[11px] transition-colors',
-                  activePreset === preset.id
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-ring/50 hover:text-foreground',
-                ].join(' ')}
+                className="w-full"
               >
                 {preset.label}
-              </button>
+              </Button>
             ))}
           </div>
           {activePreset === 'custom' && (
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="cron-expr" className="text-xs text-muted-foreground">
-                Cron expression
-              </Label>
-              <Input
-                id="cron-expr"
-                value={value.expression}
-                onChange={(e) => onChange({ type: 'Cron', expression: e.target.value })}
-                placeholder="0 * * * * *"
-                className="h-7 font-mono text-xs"
-              />
+            <div className="space-y-2">
+              <Label htmlFor="cron-expr">Cron expression</Label>
+              <Input id="cron-expr" value={value.expression} onChange={(e) => onChange({ type: 'Cron', expression: e.target.value })} placeholder="0 * * * *" className="font-mono" />
             </div>
           )}
         </div>
       )}
 
-      {/* OneShot — datetime picker */}
       {value.type === 'OneShot' && (
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="run-at" className="text-xs text-muted-foreground">
-            Run at
-          </Label>
-          <Input
-            id="run-at"
-            type="datetime-local"
-            value={toDatetimeLocal(value.run_at)}
-            onChange={(e) => {
-              const iso = e.target.value ? new Date(e.target.value).toISOString() : '';
-              onChange({ type: 'OneShot', run_at: iso });
-            }}
-            className="h-7 text-xs"
-          />
+        <div className="space-y-2">
+          <Label htmlFor="run-at">Run at</Label>
+          <Input id="run-at" type="datetime-local" value={toDatetimeLocal(value.run_at)} onChange={(e) => onChange({ type: 'OneShot', run_at: e.target.value ? new Date(e.target.value).toISOString() : '' })} />
         </div>
       )}
 
-      {/* OnLogin / OnWake — no extra fields */}
       {(value.type === 'OnLogin' || value.type === 'OnWake') && (
-        <p className="text-xs text-muted-foreground">
-          {value.type === 'OnLogin'
-            ? 'Task will run each time you log in.'
-            : 'Task will run each time the system wakes from sleep.'}
+        <p className="text-sm text-muted-foreground">
+          {value.type === 'OnLogin' ? 'Task will run each time you log in.' : 'Task will run each time the system wakes from sleep.'}
         </p>
       )}
     </div>

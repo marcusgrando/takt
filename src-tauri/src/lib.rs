@@ -32,29 +32,18 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // Build the popover window: transparent so vibrancy shows through
+            // Build the popover window — opaque white, no decorations
             let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
                     .title("cronmac")
                     .inner_size(280.0, 400.0)
                     .resizable(false)
                     .decorations(false)
-                    .transparent(true)
                     .shadow(true)
                     .always_on_top(true)
                     .visible(false)
                     .skip_taskbar(true)
                     .build()?;
-
-            // Native macOS frosted-glass popover effect with 12px corner radius
-            #[cfg(target_os = "macos")]
-            window_vibrancy::apply_vibrancy(
-                &window,
-                window_vibrancy::NSVisualEffectMaterial::Popover,
-                None,
-                Some(12.0),
-            )
-            .expect("apply_vibrancy failed");
 
             // Auto-dismiss: hide the popover when it loses focus (click outside)
             let window_focus = window.clone();

@@ -4694,7 +4694,6 @@ dependencies = [
  "tokio",
  "tokio-cron-scheduler",
  "uuid",
- "window-vibrancy",
 ]
 
 [[package]]
