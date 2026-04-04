@@ -57,6 +57,9 @@ pub fn run() {
             // Register LaunchAgent for auto-start on login (bundled .app only)
             launch_agent::ensure_registered();
 
+            // Request Accessibility permission (shows macOS prompt if not granted)
+            request_accessibility_permission();
+
             // Async init — block until AppState is ready before IPC is available
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -161,3 +164,47 @@ fn show_near_tray(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h
     let _ = window.show();
     let _ = window.set_focus();
 }
+
+/// Check Accessibility permission and prompt the user if not granted.
+/// Uses AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt=true
+/// which shows the native macOS "allow Accessibility" dialog.
+#[cfg(target_os = "macos")]
+fn request_accessibility_permission() {
+    use std::ffi::c_void;
+
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+        fn CFDictionaryCreate(
+            allocator: *const c_void,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            num_values: isize,
+            key_callbacks: *const c_void,
+            value_callbacks: *const c_void,
+        ) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+
+        static kAXTrustedCheckOptionPrompt: *const c_void;
+        static kCFBooleanTrue: *const c_void;
+        static kCFTypeDictionaryKeyCallBacks: c_void;
+        static kCFTypeDictionaryValueCallBacks: c_void;
+    }
+
+    unsafe {
+        let keys = [kAXTrustedCheckOptionPrompt];
+        let values = [kCFBooleanTrue];
+        let options = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            &kCFTypeDictionaryKeyCallBacks as *const c_void,
+            &kCFTypeDictionaryValueCallBacks as *const c_void,
+        );
+        let _trusted = AXIsProcessTrustedWithOptions(options);
+        CFRelease(options);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_accessibility_permission() {}
