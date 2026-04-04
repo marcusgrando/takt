@@ -43,8 +43,6 @@ pub async fn update_task(
 ) -> Result<TaskDto, String> {
     let task = state.store.update_task(&id, name, description, enabled, schedule, action)
         .await.map_err(|e| e.to_string())?;
-    // NOTE: remove_task is a no-op stub in v1; the old in-memory job keeps running
-    // until the next app restart. Full job tracking by UUID is planned for v2.
     state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
     if task.enabled {
         state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;
@@ -54,8 +52,6 @@ pub async fn update_task(
 
 #[tauri::command]
 pub async fn delete_task(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    // NOTE: remove_task is a no-op stub in v1. The in-memory cron job will keep
-    // firing until the next app restart. Full removal by job UUID is planned for v2.
     state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
     state.store.delete_task(&id).await.map_err(|e| e.to_string())
 }
