@@ -103,7 +103,7 @@ pub fn run() {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let quit = MenuItem::with_id(app, "quit", "Quit cronmac", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&quit])?;
 
     TrayIconBuilder::new()
