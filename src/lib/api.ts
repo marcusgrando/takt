@@ -83,6 +83,8 @@ export async function getTask(id: string): Promise<TaskDto | null> {
 export async function createTask(params: {
   name: string;
   description?: string;
+  run_if_missed?: boolean;
+  notify_on_run?: boolean;
   schedule: Schedule;
   action: Action;
 }): Promise<TaskDto> {

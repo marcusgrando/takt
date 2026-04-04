@@ -22,11 +22,13 @@ pub async fn get_task(id: String, state: State<'_, AppState>) -> Result<Option<T
 pub async fn create_task(
     name: String,
     description: Option<String>,
+    run_if_missed: Option<bool>,
+    notify_on_run: Option<bool>,
     schedule: Schedule,
     action: Action,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    let task = state.store.create_task(name, description, schedule.clone(), action.clone())
+    let task = state.store.create_task(name, description, run_if_missed.unwrap_or(true), notify_on_run.unwrap_or(false), schedule.clone(), action.clone())
         .await.map_err(|e| e.to_string())?;
     if task.enabled {
         state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;

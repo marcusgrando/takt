@@ -31,6 +31,8 @@ impl TaskStore {
         &self,
         name: String,
         description: Option<String>,
+        run_if_missed: bool,
+        notify_on_run: bool,
         schedule: Schedule,
         action: Action,
     ) -> anyhow::Result<TaskDto> {
@@ -41,11 +43,13 @@ impl TaskStore {
 
         sqlx::query(
             "INSERT INTO tasks (id, name, description, enabled, run_if_missed, notify_on_run, schedule_json, action_json, created_at, updated_at)
-             VALUES (?, ?, ?, 1, 1, 0, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&name)
         .bind(&description)
+        .bind(run_if_missed as i64)
+        .bind(notify_on_run as i64)
         .bind(&schedule_json)
         .bind(&action_json)
         .bind(&now)

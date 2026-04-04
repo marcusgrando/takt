@@ -135,7 +135,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
       if (isEdit) {
         await updateTask({ id: task!.id, name: name.trim(), description: description.trim() || null, run_if_missed: runIfMissed, notify_on_run: notifyOnRun, schedule, action });
       } else {
-        await createTask({ name: name.trim(), description: description.trim() || undefined, schedule, action });
+        await createTask({ name: name.trim(), description: description.trim() || undefined, run_if_missed: runIfMissed, notify_on_run: notifyOnRun, schedule, action });
       }
       closingRef.current = true; // allow window to close without prompt
       onSaved?.();
