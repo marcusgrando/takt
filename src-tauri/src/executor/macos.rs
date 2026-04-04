@@ -107,7 +107,13 @@ fn open_file(path: &str, app: Option<&str>) -> Result<(), ExecutorError> {
 
 fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
     let workspace = NSWorkspace::sharedWorkspace();
-    let ns_url = NSURL::URLWithString(&NSString::from_str(url))
+    // Normalize: add https:// if no scheme is present
+    let normalized = if !url.contains("://") {
+        format!("https://{}", url)
+    } else {
+        url.to_string()
+    };
+    let ns_url = NSURL::URLWithString(&NSString::from_str(&normalized))
         .ok_or_else(|| ExecutorError::CommandFailed(format!("Invalid URL: {}", url)))?;
 
     if let Some(browser_name) = browser {
