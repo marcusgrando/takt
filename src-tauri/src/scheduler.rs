@@ -4,6 +4,17 @@ use crate::store::TaskStore;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
+/// Convert 5-field standard cron to 6-field (prepend seconds=0).
+/// tokio-cron-scheduler requires sec min hour dom month dow [year].
+fn normalize_cron(expr: &str) -> String {
+    let parts: Vec<&str> = expr.trim().split_whitespace().collect();
+    if parts.len() == 5 {
+        format!("0 {}", expr.trim())
+    } else {
+        expr.trim().to_string()
+    }
+}
+
 pub struct AppScheduler {
     inner: JobScheduler,
     executor: Arc<Box<dyn ActionExecutor>>,
@@ -44,7 +55,7 @@ impl AppScheduler {
 
         match &task.schedule {
             Schedule::Cron { expression } => {
-                let expr = expression.clone();
+                let expr = normalize_cron(expression);
                 let job = Job::new_async(expr.as_str(), move |_uuid, _lock| {
                     let action = action.clone();
                     let executor = Arc::clone(&executor);

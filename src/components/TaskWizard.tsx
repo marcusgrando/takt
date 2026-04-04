@@ -104,7 +104,7 @@ export default function TaskWizard({ initialTask, onSaved, onCancel }: TaskWizar
         <button
           type="button"
           onClick={onCancel}
-          className="text-xs text-muted-foreground hover:text-foreground"
+          className="text-xs text-muted-foreground hover:text-foreground transition-opacity hover:opacity-70"
         >
           ← Cancel
         </button>
@@ -118,7 +118,7 @@ export default function TaskWizard({ initialTask, onSaved, onCancel }: TaskWizar
               key={i}
               className={[
                 'size-1.5 rounded-full transition-colors',
-                i === step ? 'bg-foreground' : 'bg-muted-foreground/30',
+                i < step ? 'bg-primary' : i === step ? 'bg-foreground' : 'bg-muted-foreground/30',
               ].join(' ')}
             />
           ))}

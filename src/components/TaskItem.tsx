@@ -32,6 +32,26 @@ function getActionLabel(action: Action): string {
   }
 }
 
+function getActionBadgeClass(action: Action): string {
+  switch (action.type) {
+    case 'OpenUrl':
+      return 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-transparent';
+    case 'RunCommand':
+      return 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-transparent';
+    case 'Notify':
+      return 'bg-orange-500/15 text-orange-700 dark:text-orange-400 border-transparent';
+    case 'OpenFile':
+      return 'bg-green-500/15 text-green-700 dark:text-green-400 border-transparent';
+    case 'Shortcut':
+      return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-transparent';
+    case 'Webhook':
+      return 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-transparent';
+    default:
+      (action as never) satisfies never;
+      return 'border-transparent';
+  }
+}
+
 export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
@@ -89,6 +109,13 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
   return (
     <div className="flex flex-col px-3 py-2 hover:bg-muted/50 group">
       <div className="flex items-center gap-2">
+        {/* Status dot */}
+        <span
+          className={task.enabled
+            ? 'size-1.5 rounded-full bg-green-500 shrink-0'
+            : 'size-1.5 rounded-full bg-muted-foreground/40 shrink-0'}
+        />
+
         {/* Toggle */}
         <Switch
           checked={task.enabled}
@@ -108,7 +135,7 @@ export default function TaskItem({ task, onEdit, onDeleted }: TaskItemProps) {
           </span>
           <Badge
             variant="secondary"
-            className="mt-0.5 w-fit text-[10px] h-4 px-1.5"
+            className={`mt-0.5 w-fit text-[10px] h-4 px-1.5 ${getActionBadgeClass(task.action)}`}
           >
             {getActionLabel(task.action)}
           </Badge>

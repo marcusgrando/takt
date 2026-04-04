@@ -19,13 +19,13 @@ export default function App() {
   });
 
   return (
-    <div className="flex flex-col h-screen w-full text-foreground select-none">
+    <div className="flex flex-col h-screen w-full text-foreground select-none bg-transparent">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 h-10 border-b shrink-0">
-        <span className="text-sm font-semibold">cronmac</span>
+      <div className="flex items-center justify-between px-3 h-10 border-b border-border shrink-0">
+        <span className="text-sm font-semibold tracking-tight">cronmac</span>
         <button
           onClick={() => setView('add')}
-          className="text-muted-foreground hover:text-foreground text-lg leading-none"
+          className="text-primary text-xl leading-none hover:opacity-70 transition-opacity"
           title="Add task"
         >
           +
@@ -88,7 +88,7 @@ export default function App() {
       <div className="flex items-center justify-end px-3 h-8 border-t shrink-0">
         <button
           onClick={() => setView('history')}
-          className="text-xs text-muted-foreground hover:text-foreground"
+          className="text-[11px] text-primary hover:opacity-70 transition-opacity"
         >
           History
         </button>

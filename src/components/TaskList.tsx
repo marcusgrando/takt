@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listTasks } from '@/lib/api';
 import { queryClient } from '@/lib';
 import TaskItem from './TaskItem';
-import { Loader2 } from 'lucide-react';
+import { CalendarClock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface TaskListProps {
@@ -45,10 +45,14 @@ export default function TaskList({ onEdit, onAdd }: TaskListProps) {
 
   if (!tasks || tasks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
-        <p className="text-xs text-muted-foreground">No tasks yet.</p>
-        <Button variant="outline" size="xs" onClick={onAdd}>
-          + Add one
+      <div className="flex flex-col items-center justify-center h-full gap-3 p-4 text-center">
+        <CalendarClock className="size-8 text-muted-foreground/40" />
+        <div className="flex flex-col gap-0.5">
+          <p className="text-sm font-medium">No tasks yet</p>
+          <p className="text-xs text-muted-foreground">Schedule your first automation.</p>
+        </div>
+        <Button variant="default" size="xs" onClick={onAdd}>
+          New Task
         </Button>
       </div>
     );

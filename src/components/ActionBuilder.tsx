@@ -67,14 +67,14 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
   return (
     <div className="flex flex-col gap-3">
       {/* Type tabs */}
-      <div className="flex gap-1 rounded-lg bg-muted p-0.5">
+      <div className="flex gap-1 overflow-x-auto scrollbar-none rounded-lg bg-muted p-0.5">
         {ACTION_TYPES.map(({ type, label }) => (
           <button
             key={type}
             type="button"
             onClick={() => handleTypeChange(type)}
             className={[
-              'flex-1 rounded-md px-1 py-1 text-[11px] font-medium transition-colors',
+              'shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap',
               value.type === type
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground',

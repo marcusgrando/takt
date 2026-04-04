@@ -61,7 +61,7 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
   function handlePresetChange(preset: CronPreset) {
     if (value.type !== 'Cron') return;
     if (preset === 'custom') {
-      onChange({ type: 'Cron', expression: value.expression });
+      onChange({ type: 'Cron', expression: '' });
     } else {
       const p = CRON_PRESETS.find((p) => p.id === preset)!;
       onChange({ type: 'Cron', expression: p.expr });
@@ -104,7 +104,7 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
                 className={[
                   'rounded-md border px-2 py-1 text-[11px] transition-colors',
                   activePreset === preset.id
-                    ? 'border-ring bg-accent text-accent-foreground'
+                    ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border text-muted-foreground hover:border-ring/50 hover:text-foreground',
                 ].join(' ')}
               >
@@ -121,7 +121,7 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
                 id="cron-expr"
                 value={value.expression}
                 onChange={(e) => onChange({ type: 'Cron', expression: e.target.value })}
-                placeholder="* * * * *"
+                placeholder="0 * * * * *"
                 className="h-7 font-mono text-xs"
               />
             </div>

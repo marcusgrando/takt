@@ -31,7 +31,7 @@ function formatRelativeTime(isoString: string): string {
 function StatusBadge({ status }: { status: ExecutionLog['status'] }) {
   if (status === 'success') {
     return (
-      <Badge className="text-[10px] h-4 px-1.5 bg-green-500/15 text-green-700 dark:text-green-400 border-transparent">
+      <Badge className="text-[10px] h-4 px-1.5 bg-green-500/12 text-green-700 dark:text-green-400 border-transparent">
         success
       </Badge>
     );
@@ -61,7 +61,7 @@ function LogEntry({ log, taskName }: { log: ExecutionLog; taskName: string }) {
         <button
           onClick={() => setExpanded((v) => !v)}
           disabled={!hasDetails}
-          className="shrink-0 text-muted-foreground disabled:opacity-30"
+          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
           aria-label={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? (
@@ -148,7 +148,7 @@ export default function HistoryView({ onBack }: HistoryViewProps) {
       <div className="flex items-center gap-2 px-3 h-9 border-b shrink-0">
         <button
           onClick={onBack}
-          className="text-xs text-muted-foreground hover:text-foreground leading-none"
+          className="text-xs text-muted-foreground hover:text-foreground transition-opacity hover:opacity-70 leading-none"
           aria-label="Back to task list"
         >
           ← Back
@@ -177,8 +177,9 @@ export default function HistoryView({ onBack }: HistoryViewProps) {
         )}
 
         {!logsLoading && !logsError && (!logs || logs.length === 0) && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-muted-foreground">No execution history yet.</p>
+          <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
+            <p className="text-sm font-medium">No history yet</p>
+            <p className="text-xs text-muted-foreground">Executions will appear here.</p>
           </div>
         )}
 
