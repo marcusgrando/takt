@@ -1,11 +1,21 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryClient } from '@/lib';
+import { listTasks } from '@/lib/api';
 import TaskList from './components/TaskList';
+import TaskWizard from './components/TaskWizard';
 
 type View = 'list' | 'add' | 'edit' | 'history';
 
 export default function App() {
   const [view, setView] = useState<View>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const { data: tasks } = useQuery({
+    queryKey: ['tasks'],
+    queryFn: listTasks,
+    staleTime: 30_000,
+  });
 
   return (
     <div className="flex flex-col h-screen w-full bg-background text-foreground select-none">
@@ -29,16 +39,18 @@ export default function App() {
             onAdd={() => setView('add')}
           />
         )}
+
         {(view === 'add' || view === 'edit') && (
-          <div className="p-4">
-            <p className="text-sm text-muted-foreground">
-              {view === 'add' ? 'Create task (coming soon)' : `Edit task ${editingId}`}
-            </p>
-            <button onClick={() => setView('list')} className="mt-2 text-sm underline">
-              Back
-            </button>
-          </div>
+          <TaskWizard
+            initialTask={view === 'edit' ? tasks?.find((t) => t.id === editingId) : undefined}
+            onSaved={() => {
+              queryClient.invalidateQueries({ queryKey: ['tasks'] });
+              setView('list');
+            }}
+            onCancel={() => setView('list')}
+          />
         )}
+
         {view === 'history' && (
           <div className="p-4">
             <button onClick={() => setView('list')} className="text-xs text-muted-foreground hover:text-foreground mb-2">
