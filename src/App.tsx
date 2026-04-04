@@ -10,30 +10,32 @@ import HistoryView from './components/HistoryView';
 
 type View = 'list' | 'templates' | 'history';
 
-let editorCounter = 0;
-
 async function openEditorWindow(params: { template?: TemplateName; taskId?: string }) {
   const query = new URLSearchParams();
   if (params.template) query.set('template', params.template);
   if (params.taskId) query.set('taskId', params.taskId);
 
-  const label = `editor-${++editorCounter}`;
+  const label = `editor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const url = `/src/editor.html?${query.toString()}`;
 
-  const win = new WebviewWindow(label, {
-    url,
-    title: params.taskId ? 'Edit Task — cronmac' : 'New Task — cronmac',
-    width: 500,
-    height: 600,
-    resizable: true,
-    center: true,
-    decorations: true,
-  });
+  try {
+    const win = new WebviewWindow(label, {
+      url,
+      title: params.taskId ? 'Edit Task — cronmac' : 'New Task — cronmac',
+      width: 500,
+      height: 600,
+      resizable: true,
+      center: true,
+      decorations: true,
+    });
 
-  // Refresh task list when editor closes
-  win.once('tauri://destroyed', () => {
-    queryClient.invalidateQueries({ queryKey: ['tasks'] });
-  });
+    // Refresh task list when editor closes
+    win.once('tauri://destroyed', () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    });
+  } catch (err) {
+    console.error('Failed to open editor window:', err);
+  }
 }
 
 export default function App() {
