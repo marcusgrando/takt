@@ -54,7 +54,7 @@ function formatTime(hour: number, minute: number): string {
 
 function describeSchedule(schedule: Schedule): string {
   switch (schedule.type) {
-    case 'DailyFirstUse': return 'Daily first use';
+    case 'DailyFirstUse': return `Daily after ${schedule.delay_minutes} min`;
     case 'OneShot': {
       const d = new Date(schedule.run_at);
       if (isNaN(d.getTime())) return 'One time';

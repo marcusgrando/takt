@@ -112,7 +112,7 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
         break;
       }
       case 'DailyFirstUse':
-        onChange({ type: 'DailyFirstUse' });
+        onChange({ type: 'DailyFirstUse', delay_minutes: 5 });
         break;
     }
   }
@@ -328,9 +328,26 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
 
       {/* ── Daily First Use ── */}
       {value.type === 'DailyFirstUse' && (
-        <p className="text-sm text-muted-foreground">
-          Runs once per day, 5 minutes after you start using your Mac.
-        </p>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Runs once per day after continuous active use of your Mac.
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">After</span>
+            <Input
+              type="number"
+              min={1}
+              max={60}
+              value={value.delay_minutes}
+              onChange={(e) => {
+                const v = parseInt(e.target.value);
+                if (!isNaN(v) && v >= 1) onChange({ type: 'DailyFirstUse', delay_minutes: v });
+              }}
+              className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            />
+            <span className="text-sm text-muted-foreground">{value.delay_minutes === 1 ? 'minute' : 'minutes'}</span>
+          </div>
+        </div>
       )}
     </div>
   );

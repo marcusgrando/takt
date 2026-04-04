@@ -5,6 +5,10 @@ fn default_shortcut_delay() -> u64 {
     1
 }
 
+fn default_first_use_delay() -> u64 {
+    5
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Task {
     pub id: String, // UUID as string for SQLite
@@ -40,7 +44,10 @@ pub struct TaskDto {
 pub enum Schedule {
     Cron { expression: String },
     OneShot { run_at: String }, // ISO 8601 DateTime
-    DailyFirstUse,
+    DailyFirstUse {
+        #[serde(default = "default_first_use_delay")]
+        delay_minutes: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

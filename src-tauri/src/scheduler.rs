@@ -99,7 +99,7 @@ impl AppScheduler {
                         false
                     }
                 }
-                Schedule::DailyFirstUse => false, // has its own logic
+                Schedule::DailyFirstUse { .. } => false, // has its own logic
             };
 
             if should_catch_up {
@@ -191,11 +191,12 @@ impl AppScheduler {
                     });
                 }
             }
-            Schedule::DailyFirstUse => {
-                // Executes once per day after 5 minutes of continuous active use.
-                // If the Mac sleeps/locks before 5 minutes, the timer resets.
+            Schedule::DailyFirstUse { delay_minutes } => {
+                // Executes once per day after N minutes of continuous active use.
+                // If the Mac sleeps/locks before the threshold, the timer resets.
                 // Uses wall-clock gap detection: if a 30s tick takes much longer,
                 // the system was asleep — reset accumulated time.
+                let required_secs: u64 = delay_minutes * 60;
                 let store_guard = Arc::clone(&store);
                 let task_id_guard = task_id.clone();
                 tokio::spawn(async move {
@@ -204,8 +205,8 @@ impl AppScheduler {
                         return;
                     }
 
-                    // Accumulate 5 minutes of active use in 30s ticks
-                    const REQUIRED_SECS: u64 = 300;
+                    // Accumulate active use in 30s ticks
+                    let required_secs = required_secs;
                     const TICK_SECS: u64 = 30;
                     // If a tick takes more than 3x expected, system was likely asleep
                     const SLEEP_THRESHOLD_SECS: u64 = TICK_SECS * 3;
@@ -227,7 +228,7 @@ impl AppScheduler {
                         }
 
                         accumulated_secs += TICK_SECS;
-                        if accumulated_secs >= REQUIRED_SECS {
+                        if accumulated_secs >= required_secs {
                             break;
                         }
                     }
