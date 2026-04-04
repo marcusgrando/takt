@@ -181,49 +181,16 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
 
           {/* ── Daily ── */}
           {recurring.frequency === 'daily' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Every</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={recurring.dailyInterval}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value);
-                    if (!isNaN(v) && v >= 1) updateRecurring({ dailyInterval: v });
-                  }}
-                  className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-                <span className="text-sm text-muted-foreground">{recurring.dailyInterval === 1 ? 'Day' : 'Days'}</span>
-              </div>
-              <Separator />
-              <TimeField
-                hour={recurring.hour}
-                minute={recurring.minute}
-                onChange={(h, m) => updateRecurring({ hour: h, minute: m })}
-              />
-            </div>
+            <TimeField
+              hour={recurring.hour}
+              minute={recurring.minute}
+              onChange={(h, m) => updateRecurring({ hour: h, minute: m })}
+            />
           )}
 
           {/* ── Weekly ── */}
           {recurring.frequency === 'weekly' && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Every</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={52}
-                  value={recurring.weeklyInterval}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value);
-                    if (!isNaN(v) && v >= 1) updateRecurring({ weeklyInterval: v });
-                  }}
-                  className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-                <span className="text-sm text-muted-foreground">{recurring.weeklyInterval === 1 ? 'Week' : 'Weeks'}</span>
-              </div>
               <WeekdayGrid
                 selected={recurring.weekdays}
                 onChange={(days) => updateRecurring({ weekdays: days })}
@@ -240,22 +207,6 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
           {/* ── Monthly ── */}
           {recurring.frequency === 'monthly' && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Every</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={12}
-                  value={recurring.monthlyInterval}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value);
-                    if (!isNaN(v) && v >= 1) updateRecurring({ monthlyInterval: v });
-                  }}
-                  className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-                <span className="text-sm text-muted-foreground">{recurring.monthlyInterval === 1 ? 'Month' : 'Months'}</span>
-              </div>
-
               {/* Each / On the radio */}
               <div className="space-y-3">
                 <label className="flex items-center gap-2 cursor-pointer">

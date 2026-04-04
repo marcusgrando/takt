@@ -8,13 +8,10 @@ export interface RecurringState {
   // Hourly
   intervalValue: number;
   intervalUnit: IntervalUnit;
-  // Daily
-  dailyInterval: number;
+  // Daily — not used (daily always fires every day)
   // Weekly
-  weeklyInterval: number;
   weekdays: number[]; // 0=Sun, 1=Mon, ..., 6=Sat
-  // Monthly
-  monthlyInterval: number;
+  // Monthly — not used (monthly always fires every month)
   monthlyMode: MonthlyMode;
   monthDays: number[]; // 1-31
   ordinalPosition: OrdinalPosition;
@@ -30,10 +27,7 @@ export const DEFAULT_RECURRING: RecurringState = {
   frequency: 'daily',
   intervalValue: 1,
   intervalUnit: 'hours',
-  dailyInterval: 1,
-  weeklyInterval: 1,
   weekdays: [1], // Monday
-  monthlyInterval: 1,
   monthlyMode: 'each',
   monthDays: [1],
   ordinalPosition: 'first',
@@ -65,25 +59,23 @@ export function buildCron(state: RecurringState): string {
         : `0 */${state.intervalValue} * * *`;
     }
     case 'daily': {
-      const dayPart = state.dailyInterval > 1 ? `*/${state.dailyInterval}` : '*';
-      return `${state.minute} ${state.hour} ${dayPart} * *`;
+      return `${state.minute} ${state.hour} * * *`;
     }
     case 'weekly': {
       const days = state.weekdays.length > 0 ? state.weekdays.sort((a, b) => a - b).join(',') : '1';
       return `${state.minute} ${state.hour} * * ${days}`;
     }
     case 'monthly': {
-      const monthPart = state.monthlyInterval > 1 ? `*/${state.monthlyInterval}` : '*';
       if (state.monthlyMode === 'each') {
         const days = state.monthDays.length > 0 ? state.monthDays.sort((a, b) => a - b).join(',') : '1';
-        return `${state.minute} ${state.hour} ${days} ${monthPart} *`;
+        return `${state.minute} ${state.hour} ${days} * *`;
       }
       // "On the" mode: use weekday#ordinal syntax
       const ord = ORDINAL_MAP[state.ordinalPosition];
       if (ord === 'L') {
-        return `${state.minute} ${state.hour} * ${monthPart} ${state.ordinalWeekday}L`;
+        return `${state.minute} ${state.hour} * * ${state.ordinalWeekday}L`;
       }
-      return `${state.minute} ${state.hour} * ${monthPart} ${state.ordinalWeekday}#${ord}`;
+      return `${state.minute} ${state.hour} * * ${state.ordinalWeekday}#${ord}`;
     }
     case 'custom':
       return state.customExpression;
@@ -101,8 +93,8 @@ export function parseCron(expression: string): RecurringState {
   // Try to detect hourly: minute or hour field has */N or *, and dom/mon/dow are all *
   if (domField === '*' && monField === '*' && dowField === '*') {
     // Hourly with minutes interval: */N * * * * or * * * * *
-    if (hourField === '*') {
-      const minInterval = parseInterval(minField);
+    if (hourField === '*' && (minField === '*' || minField.match(/^\*\/\d+$/))) {
+      const minInterval = parseStepInterval(minField);
       if (minInterval !== null) {
         return {
           ...DEFAULT_RECURRING,
@@ -113,10 +105,10 @@ export function parseCron(expression: string): RecurringState {
       }
     }
 
-    // Hourly with hours interval: 0 */N * * * or N N * * *
-    if (minField.match(/^\d+$/) && hourField.match(/^\*\/?\d*$/)) {
-      const hourInterval = parseInterval(hourField);
-      if (hourInterval !== null && hourInterval > 1) {
+    // Hourly with hours interval: 0 */N * * * or 0 * * * *
+    if (minField.match(/^\d+$/) && (hourField === '*' || hourField.match(/^\*\/\d+$/))) {
+      const hourInterval = parseStepInterval(hourField);
+      if (hourInterval !== null) {
         return {
           ...DEFAULT_RECURRING,
           frequency: 'hourly',
@@ -124,28 +116,16 @@ export function parseCron(expression: string): RecurringState {
           intervalValue: hourInterval,
         };
       }
-      if (hourInterval === 1) {
-        return {
-          ...DEFAULT_RECURRING,
-          frequency: 'hourly',
-          intervalUnit: 'hours',
-          intervalValue: 1,
-        };
-      }
     }
 
-    // Daily: M H */N * * or M H * * *
+    // Daily: M H * * *
     if (minField.match(/^\d+$/) && hourField.match(/^\d+$/)) {
-      const dailyInterval = parseInterval(domField);
-      if (dailyInterval !== null) {
-        return {
-          ...DEFAULT_RECURRING,
-          frequency: 'daily',
-          hour: parseInt(hourField),
-          minute: parseInt(minField),
-          dailyInterval,
-        };
-      }
+      return {
+        ...DEFAULT_RECURRING,
+        frequency: 'daily',
+        hour: parseInt(hourField),
+        minute: parseInt(minField),
+      };
     }
   }
 
@@ -167,14 +147,13 @@ export function parseCron(expression: string): RecurringState {
     }
   }
 
-  // Monthly "each": M H 1,15 * * or M H 1,15 */N *
-  if (domField !== '*' && !domField.includes('/') && (dowField === '*')) {
+  // Monthly "each": M H 1,15 * *
+  if (domField !== '*' && !domField.includes('/') && dowField === '*' && (monField === '*' || monField.match(/^\*\/\d+$/))) {
     const min = parseInt(minField);
     const hour = parseInt(hourField);
     if (!isNaN(min) && !isNaN(hour)) {
       const monthDays = domField.split(',').map(Number).filter((n) => !isNaN(n) && n >= 1 && n <= 31);
       if (monthDays.length > 0) {
-        const monthlyInterval = parseInterval(monField) ?? 1;
         return {
           ...DEFAULT_RECURRING,
           frequency: 'monthly',
@@ -182,18 +161,16 @@ export function parseCron(expression: string): RecurringState {
           minute: min,
           monthlyMode: 'each',
           monthDays,
-          monthlyInterval,
         };
       }
     }
   }
 
-  // Monthly "on the": M H * * 1#2 or M H * */N 1L
-  if (domField === '*' && dowField !== '*' && (dowField.includes('#') || dowField.includes('L'))) {
+  // Monthly "on the": M H * * 1#2 or M H * * 1L
+  if (domField === '*' && dowField !== '*' && (dowField.includes('#') || dowField.includes('L')) && (monField === '*' || monField.match(/^\*\/\d+$/))) {
     const min = parseInt(minField);
     const hour = parseInt(hourField);
     if (!isNaN(min) && !isNaN(hour)) {
-      const monthlyInterval = parseInterval(monField) ?? 1;
       if (dowField.includes('#')) {
         const [dayStr, ordStr] = dowField.split('#');
         const weekday = parseInt(dayStr);
@@ -208,7 +185,6 @@ export function parseCron(expression: string): RecurringState {
             monthlyMode: 'onThe',
             ordinalPosition: posMap[ordNum],
             ordinalWeekday: weekday,
-            monthlyInterval,
           };
         }
       } else if (dowField.endsWith('L')) {
@@ -222,7 +198,6 @@ export function parseCron(expression: string): RecurringState {
             monthlyMode: 'onThe',
             ordinalPosition: 'last',
             ordinalWeekday: weekday,
-            monthlyInterval,
           };
         }
       }
@@ -233,10 +208,10 @@ export function parseCron(expression: string): RecurringState {
   return { ...DEFAULT_RECURRING, frequency: 'custom', customExpression: expression };
 }
 
-function parseInterval(field: string): number | null {
+// Parse only step-interval patterns: * → 1, star/N → N. Rejects bare integers.
+function parseStepInterval(field: string): number | null {
   if (field === '*') return 1;
   const m = field.match(/^\*\/(\d+)$/);
   if (m) return parseInt(m[1]);
-  if (field.match(/^\d+$/)) return parseInt(field);
   return null;
 }

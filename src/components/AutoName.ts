@@ -68,9 +68,7 @@ function describeSchedule(schedule: Schedule): string {
             ? `Every ${state.intervalValue} min`
             : `Every ${state.intervalValue} hour${state.intervalValue > 1 ? 's' : ''}`;
         case 'daily':
-          return state.dailyInterval === 1
-            ? `Daily at ${formatTime(state.hour, state.minute)}`
-            : `Every ${state.dailyInterval} days at ${formatTime(state.hour, state.minute)}`;
+          return `Daily at ${formatTime(state.hour, state.minute)}`;
         case 'weekly': {
           const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
           const days = state.weekdays.sort((a, b) => a - b).map((d) => dayNames[d]).join(', ');
