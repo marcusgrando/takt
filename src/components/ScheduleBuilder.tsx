@@ -1,62 +1,125 @@
+// src/components/ScheduleBuilder.tsx
+import { useState, useCallback } from 'react';
 import { type Schedule } from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import TimeField from './schedule/TimeField';
+import DayGrid from './schedule/DayGrid';
+import WeekdayGrid from './schedule/WeekdayGrid';
+import {
+  type RecurringState,
+  type FrequencyType,
+  type IntervalUnit,
+  type OrdinalPosition,
+  DEFAULT_RECURRING,
+  buildCron,
+  parseCron,
+} from './schedule/cron-utils';
 
 interface ScheduleBuilderProps {
   value: Schedule;
   onChange: (s: Schedule) => void;
 }
 
-type CronPreset = 'every-minute' | 'every-5min' | 'every-hour' | 'every-day' | 'weekly' | 'custom';
-
-const CRON_PRESETS: { id: CronPreset; label: string; expr: string }[] = [
-  { id: 'every-minute', label: 'Every minute', expr: '* * * * *' },
-  { id: 'every-5min',   label: 'Every 5 min',  expr: '*/5 * * * *' },
-  { id: 'every-hour',   label: 'Every hour',   expr: '0 * * * *' },
-  { id: 'every-day',    label: 'Every day',    expr: '0 0 * * *' },
-  { id: 'weekly',       label: 'Weekly',       expr: '0 0 * * 1' },
-  { id: 'custom',       label: 'Custom',       expr: '' },
-];
-
-function exprToPreset(expr: string): CronPreset {
-  return CRON_PRESETS.find((p) => p.id !== 'custom' && p.expr === expr)?.id ?? 'custom';
-}
-
-function toDatetimeLocal(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 const SCHEDULE_TYPES: { type: Schedule['type']; label: string }[] = [
-  { type: 'Cron',          label: 'Recurring' },
-  { type: 'OneShot',       label: 'One time' },
+  { type: 'Cron', label: 'Recurring' },
+  { type: 'OneShot', label: 'One time' },
   { type: 'DailyFirstUse', label: 'Daily first use' },
 ];
 
+const FREQUENCIES: { value: FrequencyType; label: string }[] = [
+  { value: 'hourly', label: 'Hourly' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const ORDINAL_OPTIONS: { value: OrdinalPosition; label: string }[] = [
+  { value: 'first', label: 'First' },
+  { value: 'second', label: 'Second' },
+  { value: 'third', label: 'Third' },
+  { value: 'fourth', label: 'Fourth' },
+  { value: 'last', label: 'Last' },
+];
+
+const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
-  function handleTypeChange(v: string) {
-    const type = v as Schedule['type'];
-    switch (type) {
-      case 'Cron': onChange({ type: 'Cron', expression: '0 * * * *' }); break;
-      case 'OneShot': onChange({ type: 'OneShot', run_at: new Date(Date.now() + 3_600_000).toISOString() }); break;
-      case 'DailyFirstUse': onChange({ type: 'DailyFirstUse' }); break;
+  // Recurring state — initialized by parsing the current cron expression
+  const [recurring, setRecurring] = useState<RecurringState>(() =>
+    value.type === 'Cron' ? parseCron(value.expression) : DEFAULT_RECURRING,
+  );
+
+  // OneShot state — split into date and time parts
+  const [oneShotDate, setOneShotDate] = useState(() => {
+    if (value.type !== 'OneShot') return '';
+    const d = new Date(value.run_at);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+  });
+  const [oneShotHour, setOneShotHour] = useState(() => {
+    if (value.type !== 'OneShot') return 9;
+    const d = new Date(value.run_at);
+    return isNaN(d.getTime()) ? 9 : d.getHours();
+  });
+  const [oneShotMinute, setOneShotMinute] = useState(() => {
+    if (value.type !== 'OneShot') return 0;
+    const d = new Date(value.run_at);
+    return isNaN(d.getTime()) ? 0 : d.getMinutes();
+  });
+
+  // Update recurring and emit cron
+  const updateRecurring = useCallback(
+    (patch: Partial<RecurringState>) => {
+      setRecurring((prev) => {
+        const next = { ...prev, ...patch };
+        onChange({ type: 'Cron', expression: buildCron(next) });
+        return next;
+      });
+    },
+    [onChange],
+  );
+
+  // Emit OneShot
+  function emitOneShot(date: string, hour: number, minute: number) {
+    if (!date) return;
+    const d = new Date(`${date}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`);
+    if (!isNaN(d.getTime())) {
+      onChange({ type: 'OneShot', run_at: d.toISOString() });
     }
   }
 
-  function handlePresetChange(preset: CronPreset) {
-    if (value.type !== 'Cron') return;
-    onChange({ type: 'Cron', expression: preset === 'custom' ? '' : CRON_PRESETS.find((p) => p.id === preset)!.expr });
+  function handleTypeChange(v: string) {
+    const type = v as Schedule['type'];
+    switch (type) {
+      case 'Cron':
+        onChange({ type: 'Cron', expression: buildCron(recurring) });
+        break;
+      case 'OneShot': {
+        const date = oneShotDate || new Date(Date.now() + 3_600_000).toISOString().slice(0, 10);
+        if (!oneShotDate) setOneShotDate(date);
+        emitOneShot(date, oneShotHour, oneShotMinute);
+        break;
+      }
+      case 'DailyFirstUse':
+        onChange({ type: 'DailyFirstUse' });
+        break;
+    }
   }
-
-  const activePreset = value.type === 'Cron' ? exprToPreset(value.expression) : null;
 
   return (
     <div className="space-y-4">
-      {/* Schedule type — shadcn Tabs */}
+      {/* Schedule type tabs */}
       <Tabs value={value.type} onValueChange={handleTypeChange}>
         <TabsList className="w-full">
           {SCHEDULE_TYPES.map(({ type, label }) => (
@@ -65,39 +128,254 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
         </TabsList>
       </Tabs>
 
+      {/* ── Recurring ── */}
       {value.type === 'Cron' && (
-        <div className="space-y-3">
-          <Label>Frequency</Label>
-          <div className="grid grid-cols-3 gap-2">
-            {CRON_PRESETS.map((preset) => (
-              <Button
-                key={preset.id}
-                type="button"
-                variant={activePreset === preset.id ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => handlePresetChange(preset.id)}
-                className="w-full"
-              >
-                {preset.label}
-              </Button>
-            ))}
+        <div className="space-y-4">
+          {/* Frequency selector */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Frequency</Label>
+            <Select
+              value={recurring.frequency}
+              onValueChange={(v) => updateRecurring({ frequency: v as FrequencyType })}
+            >
+              <SelectTrigger className="w-auto">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FREQUENCIES.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          {activePreset === 'custom' && (
+
+          {/* ── Hourly ── */}
+          {recurring.frequency === 'hourly' && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Every</span>
+              <Input
+                type="number"
+                min={1}
+                max={recurring.intervalUnit === 'minutes' ? 59 : 23}
+                value={recurring.intervalValue}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value);
+                  if (!isNaN(v) && v >= 1) updateRecurring({ intervalValue: v });
+                }}
+                className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <Select
+                value={recurring.intervalUnit}
+                onValueChange={(v) => updateRecurring({ intervalUnit: v as IntervalUnit })}
+              >
+                <SelectTrigger className="w-auto">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="minutes">Minutes</SelectItem>
+                  <SelectItem value="hours">Hours</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* ── Daily ── */}
+          {recurring.frequency === 'daily' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={recurring.dailyInterval}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v >= 1) updateRecurring({ dailyInterval: v });
+                  }}
+                  className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <span className="text-sm text-muted-foreground">{recurring.dailyInterval === 1 ? 'Day' : 'Days'}</span>
+              </div>
+              <Separator />
+              <TimeField
+                hour={recurring.hour}
+                minute={recurring.minute}
+                onChange={(h, m) => updateRecurring({ hour: h, minute: m })}
+              />
+            </div>
+          )}
+
+          {/* ── Weekly ── */}
+          {recurring.frequency === 'weekly' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={52}
+                  value={recurring.weeklyInterval}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v >= 1) updateRecurring({ weeklyInterval: v });
+                  }}
+                  className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <span className="text-sm text-muted-foreground">{recurring.weeklyInterval === 1 ? 'Week' : 'Weeks'}</span>
+              </div>
+              <WeekdayGrid
+                selected={recurring.weekdays}
+                onChange={(days) => updateRecurring({ weekdays: days })}
+              />
+              <Separator />
+              <TimeField
+                hour={recurring.hour}
+                minute={recurring.minute}
+                onChange={(h, m) => updateRecurring({ hour: h, minute: m })}
+              />
+            </div>
+          )}
+
+          {/* ── Monthly ── */}
+          {recurring.frequency === 'monthly' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Every</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={recurring.monthlyInterval}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v >= 1) updateRecurring({ monthlyInterval: v });
+                  }}
+                  className="w-16 text-center [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <span className="text-sm text-muted-foreground">{recurring.monthlyInterval === 1 ? 'Month' : 'Months'}</span>
+              </div>
+
+              {/* Each / On the radio */}
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="monthly-mode"
+                    checked={recurring.monthlyMode === 'each'}
+                    onChange={() => updateRecurring({ monthlyMode: 'each' })}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm font-medium">Each</span>
+                </label>
+
+                {recurring.monthlyMode === 'each' && (
+                  <DayGrid
+                    selected={recurring.monthDays}
+                    onChange={(days) => updateRecurring({ monthDays: days })}
+                  />
+                )}
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="monthly-mode"
+                    checked={recurring.monthlyMode === 'onThe'}
+                    onChange={() => updateRecurring({ monthlyMode: 'onThe' })}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm font-medium">On the</span>
+                </label>
+
+                {recurring.monthlyMode === 'onThe' && (
+                  <div className="flex gap-2">
+                    <Select
+                      value={recurring.ordinalPosition}
+                      onValueChange={(v) => updateRecurring({ ordinalPosition: v as OrdinalPosition })}
+                    >
+                      <SelectTrigger className="w-auto">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ORDINAL_OPTIONS.map(({ value, label }) => (
+                          <SelectItem key={value} value={value}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={recurring.ordinalWeekday.toString()}
+                      onValueChange={(v) => updateRecurring({ ordinalWeekday: parseInt(v) })}
+                    >
+                      <SelectTrigger className="w-auto">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEEKDAY_OPTIONS.map((day, i) => (
+                          <SelectItem key={i} value={i.toString()}>{day}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+              <TimeField
+                hour={recurring.hour}
+                minute={recurring.minute}
+                onChange={(h, m) => updateRecurring({ hour: h, minute: m })}
+              />
+            </div>
+          )}
+
+          {/* ── Custom ── */}
+          {recurring.frequency === 'custom' && (
             <div className="space-y-2">
               <Label htmlFor="cron-expr">Cron expression</Label>
-              <Input id="cron-expr" value={value.expression} onChange={(e) => onChange({ type: 'Cron', expression: e.target.value })} placeholder="0 * * * *" className="font-mono" />
+              <Input
+                id="cron-expr"
+                value={recurring.customExpression}
+                onChange={(e) => {
+                  const expr = e.target.value;
+                  setRecurring((prev) => ({ ...prev, customExpression: expr }));
+                  onChange({ type: 'Cron', expression: expr });
+                }}
+                placeholder="0 * * * *"
+                className="font-mono"
+              />
             </div>
           )}
         </div>
       )}
 
+      {/* ── One Time ── */}
       {value.type === 'OneShot' && (
-        <div className="space-y-2">
-          <Label htmlFor="run-at">Run at</Label>
-          <Input id="run-at" type="datetime-local" value={toDatetimeLocal(value.run_at)} onChange={(e) => onChange({ type: 'OneShot', run_at: e.target.value ? new Date(e.target.value).toISOString() : '' })} />
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="oneshot-date" className="text-sm font-medium">Date</Label>
+            <Input
+              id="oneshot-date"
+              type="date"
+              value={oneShotDate}
+              onChange={(e) => {
+                setOneShotDate(e.target.value);
+                emitOneShot(e.target.value, oneShotHour, oneShotMinute);
+              }}
+            />
+          </div>
+          <TimeField
+            hour={oneShotHour}
+            minute={oneShotMinute}
+            onChange={(h, m) => {
+              setOneShotHour(h);
+              setOneShotMinute(m);
+              emitOneShot(oneShotDate, h, m);
+            }}
+          />
         </div>
       )}
 
+      {/* ── Daily First Use ── */}
       {value.type === 'DailyFirstUse' && (
         <p className="text-sm text-muted-foreground">
           Runs once per day, 5 minutes after you start using your Mac.
