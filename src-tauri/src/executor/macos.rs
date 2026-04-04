@@ -46,29 +46,29 @@ impl ActionExecutor for MacosExecutor {
 
     async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError> {
         match action {
-            Action::OpenFile { path, app, post_shortcuts } => {
+            Action::OpenFile { path, app, post_shortcuts, shortcut_delay_secs } => {
                 let path = path.clone();
                 let app = app.clone();
                 run_on_main(&self.app_handle, move || open_file(&path, app.as_deref()))?;
                 if !post_shortcuts.is_empty() {
-                    wait_and_send_shortcuts(post_shortcuts).await?;
+                    wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
                 Ok(ExecutionResult { stdout: None, stderr: None })
             }
-            Action::OpenUrl { url, browser, post_shortcuts } => {
+            Action::OpenUrl { url, browser, post_shortcuts, shortcut_delay_secs } => {
                 let url = url.clone();
                 let browser = browser.clone();
                 run_on_main(&self.app_handle, move || open_url(&url, browser.as_deref()))?;
                 if !post_shortcuts.is_empty() {
-                    wait_and_send_shortcuts(post_shortcuts).await?;
+                    wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
                 Ok(ExecutionResult { stdout: None, stderr: None })
             }
-            Action::OpenApp { app_path, post_shortcuts } => {
+            Action::OpenApp { app_path, post_shortcuts, shortcut_delay_secs } => {
                 let app_path = app_path.clone();
                 run_on_main(&self.app_handle, move || open_app(&app_path))?;
                 if !post_shortcuts.is_empty() {
-                    wait_and_send_shortcuts(post_shortcuts).await?;
+                    wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
                 Ok(ExecutionResult { stdout: None, stderr: None })
             }
@@ -151,7 +151,7 @@ fn resolve_app_url(app_name: &str) -> objc2::rc::Retained<NSURL> {
 
 // ── Post-shortcuts: wait + CGEvent ────────────────────────────────────
 
-async fn wait_and_send_shortcuts(shortcuts: &[KeyCombo]) -> Result<(), ExecutorError> {
+async fn wait_and_send_shortcuts(shortcuts: &[KeyCombo], delay_secs: u64) -> Result<(), ExecutorError> {
     if !accessibility_is_trusted() {
         return Err(ExecutorError::AccessibilityRequired(
             "Grant Accessibility permission in System Settings → Privacy & Security → Accessibility"
@@ -159,8 +159,8 @@ async fn wait_and_send_shortcuts(shortcuts: &[KeyCombo]) -> Result<(), ExecutorE
         ));
     }
 
-    // Wait for the target app to become frontmost
-    tokio::time::sleep(Duration::from_millis(800)).await;
+    // Wait for the target app/page to load before sending shortcuts
+    tokio::time::sleep(Duration::from_secs(delay_secs)).await;
 
     for combo in shortcuts {
         send_key_combo(combo)?;

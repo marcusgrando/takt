@@ -44,9 +44,9 @@ function textToHeaders(text: string): Record<string, string> {
 
 function defaultAction(type: Action['type']): Action {
   switch (type) {
-    case 'OpenFile': return { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [] };
-    case 'OpenUrl': return { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [] };
-    case 'OpenApp': return { type: 'OpenApp', app_path: '', post_shortcuts: [] };
+    case 'OpenFile': return { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [], shortcut_delay_secs: 2 };
+    case 'OpenUrl': return { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [], shortcut_delay_secs: 2 };
+    case 'OpenApp': return { type: 'OpenApp', app_path: '', post_shortcuts: [], shortcut_delay_secs: 2 };
     case 'RunCommand': return { type: 'RunCommand', command: '', args: [], shell: 'Zsh' };
     case 'Notify': return { type: 'Notify', title: '', body: '', sound: true };
     case 'Webhook': return { type: 'Webhook', url: '', method: 'GET', headers: {}, body: undefined };
@@ -168,10 +168,15 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
   }
 
   const hasPostShortcuts = value.type === 'OpenFile' || value.type === 'OpenUrl' || value.type === 'OpenApp';
-  const postShortcuts = hasPostShortcuts ? (value as { post_shortcuts: KeyCombo[] }).post_shortcuts : [];
+  const postShortcuts = hasPostShortcuts ? (value as { post_shortcuts: KeyCombo[]; shortcut_delay_secs: number }).post_shortcuts : [];
+  const shortcutDelay = hasPostShortcuts ? (value as { shortcut_delay_secs: number }).shortcut_delay_secs : 2;
 
   function handleShortcutsChange(shortcuts: KeyCombo[]) {
     onChange({ ...value, post_shortcuts: shortcuts } as Action);
+  }
+
+  function handleDelayChange(secs: number) {
+    onChange({ ...value, shortcut_delay_secs: Math.max(0, secs) } as Action);
   }
 
   return (
@@ -333,6 +338,19 @@ export default function ActionBuilder({ value, onChange }: ActionBuilderProps) {
         <>
           <div className="border-t border-border pt-4" />
           <PostShortcutsEditor shortcuts={postShortcuts} onChange={handleShortcutsChange} />
+          {postShortcuts.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground shrink-0">Wait</Label>
+              <Input
+                type="number"
+                min={0}
+                value={shortcutDelay}
+                onChange={(e) => handleDelayChange(Number(e.target.value))}
+                className="w-16 text-center"
+              />
+              <span className="text-xs text-muted-foreground">seconds before shortcuts</span>
+            </div>
+          )}
         </>
       )}
     </div>

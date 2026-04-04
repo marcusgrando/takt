@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+fn default_shortcut_delay() -> u64 {
+    2
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Task {
     pub id: String, // UUID as string for SQLite
@@ -58,15 +62,21 @@ pub enum Action {
         path: String,
         app: Option<String>,
         post_shortcuts: Vec<KeyCombo>,
+        #[serde(default = "default_shortcut_delay")]
+        shortcut_delay_secs: u64,
     },
     OpenUrl {
         url: String,
         browser: Option<String>,
         post_shortcuts: Vec<KeyCombo>,
+        #[serde(default = "default_shortcut_delay")]
+        shortcut_delay_secs: u64,
     },
     OpenApp {
         app_path: String,
         post_shortcuts: Vec<KeyCombo>,
+        #[serde(default = "default_shortcut_delay")]
+        shortcut_delay_secs: u64,
     },
     RunCommand {
         command: String,

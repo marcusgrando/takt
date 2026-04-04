@@ -18,9 +18,9 @@ export type Schedule =
   | { type: 'DailyFirstUse' };
 
 export type Action =
-  | { type: 'OpenFile'; path: string; app?: string; post_shortcuts: KeyCombo[] }
-  | { type: 'OpenUrl'; url: string; browser?: string; post_shortcuts: KeyCombo[] }
-  | { type: 'OpenApp'; app_path: string; post_shortcuts: KeyCombo[] }
+  | { type: 'OpenFile'; path: string; app?: string; post_shortcuts: KeyCombo[]; shortcut_delay_secs: number }
+  | { type: 'OpenUrl'; url: string; browser?: string; post_shortcuts: KeyCombo[]; shortcut_delay_secs: number }
+  | { type: 'OpenApp'; app_path: string; post_shortcuts: KeyCombo[]; shortcut_delay_secs: number }
   | { type: 'RunCommand'; command: string; args: string[]; shell: Shell }
   | { type: 'Notify'; title: string; body: string; sound: boolean }
   | {

@@ -17,21 +17,21 @@ export const TEMPLATES: TemplateConfig[] = [
     name: 'OpenUrl',
     label: 'Open URL',
     icon: <Link className="size-5" />,
-    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [] },
+    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [], shortcut_delay_secs: 2 },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
   {
     name: 'OpenFile',
     label: 'Open File',
     icon: <FileText className="size-5" />,
-    action: { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [] },
+    action: { type: 'OpenFile', path: '', app: undefined, post_shortcuts: [], shortcut_delay_secs: 2 },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
   {
     name: 'OpenApp',
     label: 'Open App',
     icon: <AppWindow className="size-5" />,
-    action: { type: 'OpenApp', app_path: '', post_shortcuts: [] },
+    action: { type: 'OpenApp', app_path: '', post_shortcuts: [], shortcut_delay_secs: 2 },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
   {
@@ -59,7 +59,7 @@ export const TEMPLATES: TemplateConfig[] = [
     name: 'Custom',
     label: 'Custom',
     icon: <Settings className="size-5" />,
-    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [] },
+    action: { type: 'OpenUrl', url: '', browser: undefined, post_shortcuts: [], shortcut_delay_secs: 2 },
     schedule: { type: 'Cron', expression: '0 9 * * *' },
   },
 ];
