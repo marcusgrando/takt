@@ -106,7 +106,7 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
         });
         if (ok) {
           closingRef.current = true;
-          await win.destroy();
+          await win.close();
         }
       }
     });
