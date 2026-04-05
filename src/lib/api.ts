@@ -129,3 +129,7 @@ export async function listBrowsers(): Promise<string[]> {
 export async function listAppsForFile(path: string): Promise<string[]> {
   return tauriInvoke<string[]>('list_apps_for_file', { path });
 }
+
+export async function validateCron(expression: string): Promise<void> {
+  return tauriInvoke<void>('validate_cron', { expression });
+}

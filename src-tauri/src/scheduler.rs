@@ -10,7 +10,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-fn normalize_cron(expr: &str) -> String {
+pub(crate) fn normalize_cron(expr: &str) -> String {
     let expr = expr.trim();
     let parts: Vec<&str> = expr.split_whitespace().collect();
     if parts.len() == 5 {
@@ -28,7 +28,7 @@ fn missed_cron_run(expression: &str, last_run_at: Option<&str>) -> bool {
             Ok(dt) => dt.with_timezone(&Local),
             Err(_) => return false,
         },
-        None => return true, // never ran — consider missed
+        None => return false, // never ran — not a missed execution, just new
     };
 
     let expr = normalize_cron(expression);
@@ -52,7 +52,7 @@ pub struct AppScheduler {
     app_handle: tauri::AppHandle,
     job_ids: Mutex<HashMap<String, Uuid>>,
     /// Cancellation tokens for DailyFirstUse/OneShot spawned tasks
-    cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
+    cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
 }
 
 impl AppScheduler {
@@ -68,7 +68,7 @@ impl AppScheduler {
             store,
             app_handle,
             job_ids: Mutex::new(HashMap::new()),
-            cancel_tokens: Mutex::new(HashMap::new()),
+            cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -81,7 +81,12 @@ impl AppScheduler {
         let tasks = self.store.list_tasks().await?;
         for task in &tasks {
             if task.enabled {
-                self.schedule_task(task).await?;
+                if let Err(e) = self.schedule_task(task).await {
+                    eprintln!(
+                        "Warning: failed to schedule task '{}' ({}): {}",
+                        task.name, task.id, e
+                    );
+                }
             }
         }
         // Run catch-up for missed tasks after scheduling
@@ -122,7 +127,7 @@ impl AppScheduler {
                 let app_handle = self.app_handle.clone();
                 let action = task.action.clone();
                 tokio::spawn(async move {
-                    execute_and_log(
+                    let _ = execute_and_log(
                         &**executor,
                         &store,
                         &app_handle,
@@ -170,7 +175,7 @@ impl AppScheduler {
                             }
                             _ => return,
                         }
-                        execute_and_log(
+                        let _ = execute_and_log(
                             &**executor,
                             &store,
                             &app_handle,
@@ -193,19 +198,30 @@ impl AppScheduler {
                 let now = Local::now();
                 if run_at > now {
                     let delay = (run_at - now).to_std()?;
+                    let token = CancellationToken::new();
+                    let child_token = token.child_token();
+                    let tokens = Arc::clone(&self.cancel_tokens);
+                    tokens.lock().await.insert(task_id.clone(), token);
                     tokio::spawn(async move {
-                        tokio::time::sleep(delay).await;
+                        tokio::select! {
+                            _ = child_token.cancelled() => return,
+                            _ = tokio::time::sleep(delay) => {}
+                        }
                         match store.get_task(&task_id).await {
                             Ok(Some(t)) if t.enabled => { /* proceed */ }
                             Ok(Some(_)) => {
                                 let _ = store
                                     .log_execution(&task_id, "skipped", None, None, None)
                                     .await;
+                                tokens.lock().await.remove(&task_id);
                                 return;
                             }
-                            _ => return,
+                            _ => {
+                                tokens.lock().await.remove(&task_id);
+                                return;
+                            }
                         }
-                        execute_and_log(
+                        let _ = execute_and_log(
                             &**executor,
                             &store,
                             &app_handle,
@@ -215,6 +231,7 @@ impl AppScheduler {
                             &action,
                         )
                         .await;
+                        tokens.lock().await.remove(&task_id);
                     });
                 }
             }
@@ -327,7 +344,7 @@ async fn daily_first_use_loop(
                     }
                     _ => return, // deleted
                 }
-                execute_and_log(
+                let _ = execute_and_log(
                     &**executor,
                     &store,
                     &app_handle,
@@ -368,6 +385,8 @@ async fn wait_until_tomorrow_or_cancel(cancel: &CancellationToken) -> bool {
     }
 }
 
+/// Execute an action, log the result, and optionally notify.
+/// Returns Ok(()) on success, Err(message) on execution failure.
 pub(crate) async fn execute_and_log(
     executor: &dyn ActionExecutor,
     store: &TaskStore,
@@ -376,19 +395,23 @@ pub(crate) async fn execute_and_log(
     task_name: &str,
     notify: bool,
     action: &Action,
-) {
+) -> Result<(), String> {
     let result = executor.execute(action).await;
-    let (status, stdout, stderr, error) = match result {
-        Ok(r) => ("success", r.stdout, r.stderr, None),
+    let (status, stdout, stderr, error) = match &result {
+        Ok(r) => ("success", r.stdout.clone(), r.stderr.clone(), None),
         Err(e) => ("failure", None, None, Some(e.to_string())),
     };
     if notify {
         send_run_notification(app_handle, task_name, status == "success");
     }
     let _ = store
-        .log_execution(task_id, status, stdout, stderr, error)
+        .log_execution(task_id, status, stdout, stderr, error.clone())
         .await;
     let _ = store.update_last_run(task_id, None).await;
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 pub(crate) fn send_run_notification(app: &tauri::AppHandle, task_name: &str, success: bool) {
@@ -400,7 +423,7 @@ pub(crate) fn send_run_notification(app: &tauri::AppHandle, task_name: &str, suc
     let _ = app
         .notification()
         .builder()
-        .title("cronmac")
+        .title("Takt")
         .body(&body)
         .show();
 }

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { confirm } from '@tauri-apps/plugin-dialog';
-import { createTask, updateTask, deleteTask, type TaskDto, type Schedule, type Action } from '@/lib/api';
+import { createTask, updateTask, deleteTask, validateCron, type TaskDto, type Schedule, type Action } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -100,7 +100,7 @@ export default function TaskEditor({ task, template }: TaskEditorProps) {
       if (dirtyRef.current && !closingRef.current) {
         event.preventDefault();
         const ok = await confirm('You have unsaved changes. Close without saving?', {
-          title: 'cronmac',
+          title: 'Takt',
           kind: 'warning',
         });
         if (ok) {
@@ -123,7 +123,12 @@ export default function TaskEditor({ task, template }: TaskEditorProps) {
   async function handleSave() {
     setError(null);
     // Validation
-    if (schedule.type === 'Cron' && !schedule.expression.trim()) { setError('Cron expression is required'); return; }
+    if (schedule.type === 'Cron') {
+      const expr = schedule.expression.trim();
+      const parts = expr.split(/\s+/);
+      if (parts.length !== 5) { setError('Cron expression must have exactly 5 fields (min hour dom mon dow)'); return; }
+      try { await validateCron(expr); } catch (e) { setError(String(e)); return; }
+    }
     if (schedule.type === 'OneShot' && isNaN(new Date(schedule.run_at).getTime())) { setError('Invalid date'); return; }
     if (action.type === 'OpenFile' && !action.path?.trim()) { setError('File path is required'); return; }
     if (action.type === 'OpenUrl' && !action.url?.trim()) { setError('URL is required'); return; }

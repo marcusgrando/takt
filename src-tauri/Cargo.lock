@@ -626,36 +626,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cronmac"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "block2",
- "chrono",
- "core-graphics 0.24.0",
- "croner",
- "dirs 5.0.1",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sqlx",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-shell",
- "thiserror 1.0.69",
- "tokio",
- "tokio-cron-scheduler",
- "tokio-util",
- "uuid",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4697,6 +4667,36 @@ dependencies = [
  "pkg-config",
  "toml 0.8.2",
  "version-compare",
+]
+
+[[package]]
+name = "takt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "block2",
+ "chrono",
+ "core-graphics 0.24.0",
+ "croner",
+ "dirs 5.0.1",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-shell",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-cron-scheduler",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]

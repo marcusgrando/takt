@@ -106,7 +106,8 @@ export function parseCron(expression: string): RecurringState {
     }
 
     // Interval with hours interval: 0 */N * * * or 0 * * * *
-    if (minField.match(/^\d+$/) && (hourField === '*' || hourField.match(/^\*\/\d+$/))) {
+    // Only match when minute is exactly 0 — otherwise we'd lose the minute value
+    if (minField === '0' && (hourField === '*' || hourField.match(/^\*\/\d+$/))) {
       const hourInterval = parseStepInterval(hourField);
       if (hourInterval !== null) {
         return {
@@ -147,8 +148,8 @@ export function parseCron(expression: string): RecurringState {
     }
   }
 
-  // Monthly "each": M H 1,15 * *
-  if (domField !== '*' && !domField.includes('/') && dowField === '*' && (monField === '*' || monField.match(/^\*\/\d+$/))) {
+  // Monthly "each": M H 1,15 * * — only when month is unrestricted (*)
+  if (domField !== '*' && !domField.includes('/') && dowField === '*' && monField === '*') {
     const min = parseInt(minField);
     const hour = parseInt(hourField);
     if (!isNaN(min) && !isNaN(hour)) {
@@ -166,8 +167,8 @@ export function parseCron(expression: string): RecurringState {
     }
   }
 
-  // Monthly "on the": M H * * 1#2 or M H * * 1L
-  if (domField === '*' && dowField !== '*' && (dowField.includes('#') || dowField.includes('L')) && (monField === '*' || monField.match(/^\*\/\d+$/))) {
+  // Monthly "on the": M H * * 1#2 or M H * * 1L — only when month is unrestricted (*)
+  if (domField === '*' && dowField !== '*' && (dowField.includes('#') || dowField.includes('L')) && monField === '*') {
     const min = parseInt(minField);
     const hour = parseInt(hourField);
     if (!isNaN(min) && !isNaN(hour)) {

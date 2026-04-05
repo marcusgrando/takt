@@ -1,7 +1,24 @@
-# Tauri + React + Typescript
+# Takt
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+macOS menu bar task scheduler. Automate opening files, URLs, apps, running commands, sending notifications, webhooks, and keyboard shortcuts — all on a schedule.
 
-## Recommended IDE Setup
+Built with [Tauri 2](https://v2.tauri.app/) (Rust) + React 19 + TypeScript.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Development
+
+```bash
+bun install          # install frontend dependencies
+make dev             # start Tauri dev mode (hot reload)
+make check           # run all checks (fmt, lint, typecheck, tests)
+```
+
+## Build
+
+```bash
+make app             # build release .app bundle
+make dmg             # build signed release DMG
+```
+
+## License
+
+Private — all rights reserved.

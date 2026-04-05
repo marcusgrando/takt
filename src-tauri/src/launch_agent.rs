@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub fn launch_agent_path() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join("Library/LaunchAgents/com.cronmac.app.plist"))
+    Some(dirs::home_dir()?.join("Library/LaunchAgents/com.marcusgrando.takt.plist"))
 }
 
 fn xml_escape(s: &str) -> String {
@@ -12,7 +12,7 @@ fn xml_escape(s: &str) -> String {
 
 pub fn app_bundle_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    // Walk up from .app/Contents/MacOS/cronmac to .app
+    // Walk up from .app/Contents/MacOS/takt to .app
     exe.ancestors()
         .find(|a| a.extension().is_some_and(|e| e == "app"))
         .map(|p| p.to_path_buf())
@@ -26,7 +26,7 @@ pub fn plist_content(app_path: &Path) -> String {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.cronmac.app</string>
+    <string>com.marcusgrando.takt</string>
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>

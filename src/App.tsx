@@ -25,7 +25,7 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
 
     const win = new WebviewWindow(label, {
       url,
-      title: params.taskId ? 'Edit Task — cronmac' : 'New Task — cronmac',
+      title: params.taskId ? 'Edit Task — Takt' : 'New Task — Takt',
       width: 500,
       height: 600,
       resizable: true,
@@ -70,7 +70,7 @@ export default function App() {
     <div className="flex flex-col h-screen w-full bg-background text-foreground overflow-hidden rounded-2xl shadow-xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 h-12 shrink-0">
-        <span className="text-sm font-semibold tracking-tight">cronmac</span>
+        <span className="text-sm font-semibold tracking-tight">Takt</span>
         <Button variant="ghost" size="icon-sm" onClick={() => setView('templates')}>
           <Plus />
         </Button>

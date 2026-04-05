@@ -37,11 +37,11 @@ pub async fn create_task(
         .await
         .map_err(|e| e.to_string())?;
     if task.enabled {
-        state
-            .scheduler
-            .schedule_task(&task)
-            .await
-            .map_err(|e| e.to_string())?;
+        if let Err(e) = state.scheduler.schedule_task(&task).await {
+            // Rollback: remove persisted task if scheduling failed
+            let _ = state.store.delete_task(&task.id).await;
+            return Err(e.to_string());
+        }
     }
     Ok(task)
 }
@@ -59,7 +59,23 @@ pub async fn update_task(
     action: Option<Action>,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    let task = state
+    // Snapshot old state for rollback
+    let old_task = state
+        .store
+        .get_task(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Task not found".to_string())?;
+
+    // Remove old schedule
+    state
+        .scheduler
+        .remove_task(&id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Update DB
+    let task = match state
         .store
         .update_task(
             &id,
@@ -72,18 +88,39 @@ pub async fn update_task(
             action,
         )
         .await
-        .map_err(|e| e.to_string())?;
-    state
-        .scheduler
-        .remove_task(&id)
-        .await
-        .map_err(|e| e.to_string())?;
+    {
+        Ok(t) => t,
+        Err(e) => {
+            // DB failed — restore old schedule
+            if old_task.enabled {
+                let _ = state.scheduler.schedule_task(&old_task).await;
+            }
+            return Err(e.to_string());
+        }
+    };
+
+    // Re-schedule with new config
     if task.enabled {
-        state
-            .scheduler
-            .schedule_task(&task)
-            .await
-            .map_err(|e| e.to_string())?;
+        if let Err(e) = state.scheduler.schedule_task(&task).await {
+            // Scheduling failed — revert DB to old state and restore old schedule
+            let _ = state
+                .store
+                .update_task(
+                    &id,
+                    Some(old_task.name.clone()),
+                    Some(old_task.description.clone()),
+                    Some(old_task.enabled),
+                    Some(old_task.run_if_missed),
+                    Some(old_task.notify_on_run),
+                    Some(old_task.schedule.clone()),
+                    Some(old_task.action.clone()),
+                )
+                .await;
+            if old_task.enabled {
+                let _ = state.scheduler.schedule_task(&old_task).await;
+            }
+            return Err(e.to_string());
+        }
     }
     Ok(task)
 }
@@ -123,8 +160,8 @@ pub async fn run_task_now(
         task.notify_on_run,
         &task.action,
     )
-    .await;
-    Ok(())
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -174,6 +211,15 @@ pub fn list_browsers() -> Vec<String> {
 pub fn list_apps_for_file(path: String) -> Vec<String> {
     let url = NSURL::fileURLWithPath(&NSString::from_str(&path));
     apps_for_url(&url)
+}
+
+#[tauri::command]
+pub fn validate_cron(expression: String) -> Result<(), String> {
+    let expr = crate::scheduler::normalize_cron(&expression);
+    croner::Cron::new(&expr)
+        .parse()
+        .map(|_| ())
+        .map_err(|e| format!("Invalid cron expression: {}", e))
 }
 
 #[tauri::command]

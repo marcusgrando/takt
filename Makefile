@@ -1,7 +1,7 @@
-# cronmac Makefile
+# Takt Makefile
 # Tauri 2 + React + Rust — macOS menu bar app
 
-APP_NAME     := cronmac
+APP_NAME     := takt
 VERSION      := 0.1.0
 BUNDLE_DIR   := src-tauri/target/release/bundle
 APP_PATH     := $(BUNDLE_DIR)/macos/$(APP_NAME).app

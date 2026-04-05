@@ -40,7 +40,7 @@ pub fn run() {
             // Build the popover window — transparent for rounded CSS corners
             let window =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
-                    .title("cronmac")
+                    .title("Takt")
                     .inner_size(280.0, 400.0)
                     .resizable(false)
                     .decorations(false)
@@ -83,7 +83,9 @@ pub fn run() {
                         .expect("Scheduler init failed"),
                 );
                 scheduler.start().await.expect("Scheduler start failed");
-                scheduler.load_all_tasks().await.expect("Load tasks failed");
+                if let Err(e) = scheduler.load_all_tasks().await {
+                    eprintln!("Warning: failed to load tasks: {}", e);
+                }
                 handle.manage(AppState {
                     store,
                     scheduler,
@@ -105,12 +107,13 @@ pub fn run() {
             commands::list_logs,
             commands::list_browsers,
             commands::list_apps_for_file,
+            commands::validate_cron,
             commands::set_activation_policy,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // When macOS sends Reopen (user did `open cronmac.app` while running),
+            // When macOS sends Reopen (user did `open takt.app` while running),
             // relaunch as a new instance so kill_previous_instance can replace us.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {

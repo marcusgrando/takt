@@ -2,15 +2,20 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::path::PathBuf;
 
 pub async fn connect() -> anyhow::Result<SqlitePool> {
-    let db_path = db_path();
-    std::fs::create_dir_all(db_path.parent().unwrap())?;
+    let db_path = db_path()?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
     // Dev mode: recreate DB every launch to avoid migration conflicts
     if cfg!(debug_assertions) {
         let _ = std::fs::remove_file(&db_path);
     }
 
-    let db_url = format!("sqlite://{}?mode=rwc", db_path.to_str().unwrap());
+    let db_str = db_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("DB path contains invalid UTF-8"))?;
+    let db_url = format!("sqlite://{}?mode=rwc", db_str);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
@@ -20,14 +25,14 @@ pub async fn connect() -> anyhow::Result<SqlitePool> {
     Ok(pool)
 }
 
-fn db_path() -> PathBuf {
+fn db_path() -> anyhow::Result<PathBuf> {
     let base = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("cronmac");
+        .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?
+        .join("takt");
     if cfg!(debug_assertions) {
-        base.join("cronmac-dev.db")
+        Ok(base.join("takt-dev.db"))
     } else {
-        base.join("cronmac.db")
+        Ok(base.join("takt.db"))
     }
 }
 
