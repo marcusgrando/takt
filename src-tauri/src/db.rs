@@ -5,6 +5,11 @@ pub async fn connect() -> anyhow::Result<SqlitePool> {
     let db_path = db_path();
     std::fs::create_dir_all(db_path.parent().unwrap())?;
 
+    // Dev mode: recreate DB every launch to avoid migration conflicts
+    if cfg!(debug_assertions) {
+        let _ = std::fs::remove_file(&db_path);
+    }
+
     let db_url = format!("sqlite://{}?mode=rwc", db_path.to_str().unwrap());
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
@@ -19,7 +24,11 @@ fn db_path() -> PathBuf {
     let base = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("cronmac");
-    base.join("cronmac.db")
+    if cfg!(debug_assertions) {
+        base.join("cronmac-dev.db")
+    } else {
+        base.join("cronmac.db")
+    }
 }
 
 #[cfg(test)]
