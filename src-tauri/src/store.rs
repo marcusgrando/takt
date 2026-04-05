@@ -1,4 +1,4 @@
-use crate::models::{Task, TaskDto, ExecutionLog, Schedule, Action};
+use crate::models::{Action, ExecutionLog, Schedule, Task, TaskDto};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -16,7 +16,9 @@ impl TaskStore {
         let rows: Vec<Task> = sqlx::query_as("SELECT * FROM tasks ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await?;
-        rows.iter().map(|t| t.to_dto().map_err(|e| anyhow::anyhow!(e))).collect()
+        rows.iter()
+            .map(|t| t.to_dto().map_err(|e| anyhow::anyhow!(e)))
+            .collect()
     }
 
     pub async fn get_task(&self, id: &str) -> anyhow::Result<Option<TaskDto>> {
@@ -24,7 +26,8 @@ impl TaskStore {
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-        row.map(|t| t.to_dto().map_err(|e| anyhow::anyhow!(e))).transpose()
+        row.map(|t| t.to_dto().map_err(|e| anyhow::anyhow!(e)))
+            .transpose()
     }
 
     pub async fn create_task(
@@ -57,9 +60,12 @@ impl TaskStore {
         .execute(&self.pool)
         .await?;
 
-        self.get_task(&id).await?.ok_or_else(|| anyhow::anyhow!("Task not found after insert"))
+        self.get_task(&id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Task not found after insert"))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_task(
         &self,
         id: &str,
@@ -71,7 +77,9 @@ impl TaskStore {
         schedule: Option<Schedule>,
         action: Option<Action>,
     ) -> anyhow::Result<TaskDto> {
-        let existing = self.get_task(id).await?
+        let existing = self
+            .get_task(id)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
 
         let name = name.unwrap_or(existing.name);
@@ -98,7 +106,9 @@ impl TaskStore {
         .execute(&self.pool)
         .await?;
 
-        self.get_task(id).await?.ok_or_else(|| anyhow::anyhow!("Task not found after update"))
+        self.get_task(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Task not found after update"))
     }
 
     pub async fn delete_task(&self, id: &str) -> anyhow::Result<()> {
@@ -155,7 +165,7 @@ impl TaskStore {
     ) -> anyhow::Result<Vec<ExecutionLog>> {
         let logs = if let Some(tid) = task_id {
             sqlx::query_as::<_, ExecutionLog>(
-                "SELECT * FROM execution_logs WHERE task_id = ? ORDER BY started_at DESC LIMIT ?"
+                "SELECT * FROM execution_logs WHERE task_id = ? ORDER BY started_at DESC LIMIT ?",
             )
             .bind(tid)
             .bind(limit)
@@ -163,7 +173,7 @@ impl TaskStore {
             .await?
         } else {
             sqlx::query_as::<_, ExecutionLog>(
-                "SELECT * FROM execution_logs ORDER BY started_at DESC LIMIT ?"
+                "SELECT * FROM execution_logs ORDER BY started_at DESC LIMIT ?",
             )
             .bind(limit)
             .fetch_all(&self.pool)
@@ -191,16 +201,23 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_list_tasks() {
         let store = test_store().await;
-        let task = store.create_task(
-            "Test Task".to_string(),
-            None,
-            Schedule::Cron { expression: "0 8 * * 1-5".to_string() },
-            Action::RunCommand {
-                command: "echo test".to_string(),
-                args: vec![],
-                shell: Shell::Sh,
-            }
-        ).await.unwrap();
+        let task = store
+            .create_task(
+                "Test Task".to_string(),
+                None,
+                true,
+                false,
+                Schedule::Cron {
+                    expression: "0 8 * * 1-5".to_string(),
+                },
+                Action::RunCommand {
+                    command: "echo test".to_string(),
+                    args: vec![],
+                    shell: Shell::Sh,
+                },
+            )
+            .await
+            .unwrap();
 
         assert_eq!(task.name, "Test Task");
         assert!(task.enabled);
@@ -212,22 +229,35 @@ mod tests {
     #[tokio::test]
     async fn test_update_task() {
         let store = test_store().await;
-        let task = store.create_task(
-            "Original".to_string(),
-            None,
-            Schedule::DailyFirstUse,
-            Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
-        ).await.unwrap();
+        let task = store
+            .create_task(
+                "Original".to_string(),
+                None,
+                true,
+                false,
+                Schedule::DailyFirstUse { delay_minutes: 5 },
+                Action::Notify {
+                    title: "Hi".to_string(),
+                    body: "World".to_string(),
+                    sound: false,
+                },
+            )
+            .await
+            .unwrap();
 
-        let updated = store.update_task(
-            &task.id,
-            Some("Updated".to_string()),
-            None,
-            Some(false),
-            None,
-            None,
-            None,
-        ).await.unwrap();
+        let updated = store
+            .update_task(
+                &task.id,
+                Some("Updated".to_string()),
+                None,
+                Some(false),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(updated.name, "Updated");
         assert!(!updated.enabled);
@@ -236,12 +266,21 @@ mod tests {
     #[tokio::test]
     async fn test_delete_task() {
         let store = test_store().await;
-        let task = store.create_task(
-            "Delete Me".to_string(),
-            None,
-            Schedule::DailyFirstUse,
-            Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
-        ).await.unwrap();
+        let task = store
+            .create_task(
+                "Delete Me".to_string(),
+                None,
+                true,
+                false,
+                Schedule::DailyFirstUse { delay_minutes: 5 },
+                Action::Notify {
+                    title: "Hi".to_string(),
+                    body: "World".to_string(),
+                    sound: false,
+                },
+            )
+            .await
+            .unwrap();
 
         store.delete_task(&task.id).await.unwrap();
         let tasks = store.list_tasks().await.unwrap();
@@ -251,15 +290,26 @@ mod tests {
     #[tokio::test]
     async fn test_log_execution() {
         let store = test_store().await;
-        let task = store.create_task(
-            "Log Test".to_string(),
-            None,
-            Schedule::DailyFirstUse,
-            Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
-        ).await.unwrap();
+        let task = store
+            .create_task(
+                "Log Test".to_string(),
+                None,
+                true,
+                false,
+                Schedule::DailyFirstUse { delay_minutes: 5 },
+                Action::Notify {
+                    title: "Hi".to_string(),
+                    body: "World".to_string(),
+                    sound: false,
+                },
+            )
+            .await
+            .unwrap();
 
-        store.log_execution(&task.id, "success", Some("output".to_string()), None, None)
-            .await.unwrap();
+        store
+            .log_execution(&task.id, "success", Some("output".to_string()), None, None)
+            .await
+            .unwrap();
 
         let logs = store.list_logs(Some(&task.id), 10).await.unwrap();
         assert_eq!(logs.len(), 1);

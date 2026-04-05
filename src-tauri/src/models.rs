@@ -44,8 +44,12 @@ pub struct TaskDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Schedule {
-    Cron { expression: String },
-    OneShot { run_at: String }, // ISO 8601 DateTime
+    Cron {
+        expression: String,
+    },
+    OneShot {
+        run_at: String,
+    }, // ISO 8601 DateTime
     DailyFirstUse {
         #[serde(default = "default_first_use_delay")]
         delay_minutes: u64,
@@ -120,6 +124,7 @@ pub enum Shell {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum HttpMethod {
     GET,
     POST,

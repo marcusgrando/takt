@@ -14,7 +14,7 @@ pub fn app_bundle_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     // Walk up from .app/Contents/MacOS/cronmac to .app
     exe.ancestors()
-        .find(|a| a.extension().map_or(false, |e| e == "app"))
+        .find(|a| a.extension().is_some_and(|e| e == "app"))
         .map(|p| p.to_path_buf())
 }
 

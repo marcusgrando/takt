@@ -13,7 +13,6 @@
     "core:window:allow-hide",
     "core:webview:allow-create-webview-window",
     "dialog:default",
-    "opener:default",
     "notification:default",
     "shell:default"
   ]

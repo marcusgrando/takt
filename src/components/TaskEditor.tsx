@@ -20,11 +20,9 @@ export interface TaskEditorProps {
   task?: TaskDto;
   /** Create from a template */
   template?: TemplateName;
-  /** Called after successful save */
-  onSaved?: () => void;
 }
 
-export default function TaskEditor({ task, template, onSaved }: TaskEditorProps) {
+export default function TaskEditor({ task, template }: TaskEditorProps) {
   const isEdit = !!task;
 
   // Resolve initial values from task or template
@@ -144,7 +142,6 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
       // Remove close interceptor and close the window directly
       closingRef.current = true;
       unlistenRef.current?.();
-      onSaved?.();
       await getCurrentWebviewWindow().close();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -159,7 +156,8 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
     closingRef.current = true;
     try {
       await deleteTask(task.id);
-      await onSaved?.();
+      unlistenRef.current?.();
+      await getCurrentWebviewWindow().close();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDeleting(false);

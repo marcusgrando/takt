@@ -1,5 +1,5 @@
-use crate::executor::{current_executor, ActionExecutor};
-use crate::models::{Schedule, TaskDto};
+use crate::executor::ActionExecutor;
+use crate::models::{Action, Schedule, TaskDto};
 use crate::store::TaskStore;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
@@ -10,11 +10,12 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use uuid::Uuid;
 
 fn normalize_cron(expr: &str) -> String {
-    let parts: Vec<&str> = expr.trim().split_whitespace().collect();
+    let expr = expr.trim();
+    let parts: Vec<&str> = expr.split_whitespace().collect();
     if parts.len() == 5 {
-        format!("0 {}", expr.trim())
+        format!("0 {}", expr)
     } else {
-        expr.trim().to_string()
+        expr.to_string()
     }
 }
 
@@ -52,9 +53,12 @@ pub struct AppScheduler {
 }
 
 impl AppScheduler {
-    pub async fn new(store: Arc<TaskStore>, app_handle: tauri::AppHandle) -> anyhow::Result<Self> {
+    pub async fn new(
+        store: Arc<TaskStore>,
+        executor: Arc<Box<dyn ActionExecutor>>,
+        app_handle: tauri::AppHandle,
+    ) -> anyhow::Result<Self> {
         let inner = JobScheduler::new().await?;
-        let executor = Arc::new(current_executor(app_handle.clone()));
         Ok(Self {
             inner,
             executor,
@@ -114,16 +118,16 @@ impl AppScheduler {
                 let app_handle = self.app_handle.clone();
                 let action = task.action.clone();
                 tokio::spawn(async move {
-                    let result = executor.execute(&action).await;
-                    let (status, stdout, stderr, error) = match result {
-                        Ok(r) => ("success", r.stdout, r.stderr, None),
-                        Err(e) => ("failure", None, None, Some(e.to_string())),
-                    };
-                    if notify {
-                        send_run_notification(&app_handle, &task_name, status == "success");
-                    }
-                    let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
-                    let _ = store.update_last_run(&task_id, None).await;
+                    execute_and_log(
+                        &**executor,
+                        &store,
+                        &app_handle,
+                        &task_id,
+                        &task_name,
+                        notify,
+                        &action,
+                    )
+                    .await;
                 });
             }
         }
@@ -141,144 +145,125 @@ impl AppScheduler {
         match &task.schedule {
             Schedule::Cron { expression } => {
                 let expr = normalize_cron(expression);
-                let store_guard = Arc::clone(&store);
-                let task_id_for_closure = task_id.clone();
-                let task_id_guard = task_id.clone();
-                let task_name = task_name.clone();
-                let app_handle = app_handle.clone();
+                let task_id_for_map = task_id.clone();
 
                 let job = Job::new_async_tz(expr.as_str(), Local, move |_uuid, _lock| {
                     let action = action.clone();
                     let executor = Arc::clone(&executor);
                     let store = Arc::clone(&store);
-                    let task_id = task_id_for_closure.clone();
-                    let store_guard = Arc::clone(&store_guard);
-                    let task_id_guard = task_id_guard.clone();
+                    let task_id = task_id.clone();
                     let task_name = task_name.clone();
                     let app_handle = app_handle.clone();
                     Box::pin(async move {
                         // Guard: re-fetch task to check enabled/deleted
-                        match store_guard.get_task(&task_id_guard).await {
+                        match store.get_task(&task_id).await {
                             Ok(Some(t)) if t.enabled => { /* proceed */ }
                             Ok(Some(_)) => {
-                                let _ = store.log_execution(&task_id, "skipped", None, None, None).await;
-                                return;
-                            }
-                            _ => return, // deleted or error — silently skip
-                        }
-
-                        let result = executor.execute(&action).await;
-                        let (status, stdout, stderr, error) = match result {
-                            Ok(r) => ("success", r.stdout, r.stderr, None),
-                            Err(e) => ("failure", None, None, Some(e.to_string())),
-                        };
-                        if notify {
-                            send_run_notification(&app_handle, &task_name, status == "success");
-                        }
-                        let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
-                        let _ = store.update_last_run(&task_id, None).await;
-                    })
-                })?;
-
-                let job_uuid = self.inner.add(job).await?;
-                self.job_ids.lock().await.insert(task_id, job_uuid);
-            }
-            Schedule::OneShot { run_at } => {
-                let run_at: chrono::DateTime<Local> = run_at.parse::<chrono::DateTime<chrono::FixedOffset>>()?.with_timezone(&Local);
-                let now = Local::now();
-                if run_at > now {
-                    let delay = (run_at - now).to_std()?;
-                    let store_guard = Arc::clone(&store);
-                    let task_id_guard = task_id.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(delay).await;
-                        match store_guard.get_task(&task_id_guard).await {
-                            Ok(Some(t)) if t.enabled => { /* proceed */ }
-                            Ok(Some(_)) => {
-                                let _ = store.log_execution(&task_id, "skipped", None, None, None).await;
+                                let _ = store
+                                    .log_execution(&task_id, "skipped", None, None, None)
+                                    .await;
                                 return;
                             }
                             _ => return,
                         }
-                        let result = executor.execute(&action).await;
-                        let (status, stdout, stderr, error) = match result {
-                            Ok(r) => ("success", r.stdout, r.stderr, None),
-                            Err(e) => ("failure", None, None, Some(e.to_string())),
-                        };
-                        if notify {
-                            send_run_notification(&app_handle, &task_name, status == "success");
+                        execute_and_log(
+                            &**executor,
+                            &store,
+                            &app_handle,
+                            &task_id,
+                            &task_name,
+                            notify,
+                            &action,
+                        )
+                        .await;
+                    })
+                })?;
+
+                let job_uuid = self.inner.add(job).await?;
+                self.job_ids.lock().await.insert(task_id_for_map, job_uuid);
+            }
+            Schedule::OneShot { run_at } => {
+                let run_at: chrono::DateTime<Local> = run_at
+                    .parse::<chrono::DateTime<chrono::FixedOffset>>()?
+                    .with_timezone(&Local);
+                let now = Local::now();
+                if run_at > now {
+                    let delay = (run_at - now).to_std()?;
+                    tokio::spawn(async move {
+                        tokio::time::sleep(delay).await;
+                        match store.get_task(&task_id).await {
+                            Ok(Some(t)) if t.enabled => { /* proceed */ }
+                            Ok(Some(_)) => {
+                                let _ = store
+                                    .log_execution(&task_id, "skipped", None, None, None)
+                                    .await;
+                                return;
+                            }
+                            _ => return,
                         }
-                        let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
-                        let _ = store.update_last_run(&task_id, None).await;
+                        execute_and_log(
+                            &**executor,
+                            &store,
+                            &app_handle,
+                            &task_id,
+                            &task_name,
+                            notify,
+                            &action,
+                        )
+                        .await;
                     });
                 }
             }
             Schedule::DailyFirstUse { delay_minutes } => {
-                // Executes once per day after N minutes of continuous active use.
-                // If the Mac sleeps/locks before the threshold, the timer resets.
-                // Uses wall-clock gap detection: if a 30s tick takes much longer,
-                // the system was asleep — reset accumulated time.
                 let required_secs: u64 = delay_minutes * 60;
-                let store_guard = Arc::clone(&store);
-                let task_id_guard = task_id.clone();
                 tokio::spawn(async move {
-                    // Check if already executed today
-                    if ran_today(&store_guard, &task_id_guard).await {
+                    if ran_today(&store, &task_id).await {
                         return;
                     }
-
-                    // Accumulate active use in 30s ticks
                     let required_secs = required_secs;
                     const TICK_SECS: u64 = 30;
-                    // If a tick takes more than 3x expected, system was likely asleep
                     const SLEEP_THRESHOLD_SECS: u64 = TICK_SECS * 3;
-
                     let mut accumulated_secs: u64 = 0;
                     loop {
                         let before = std::time::Instant::now();
                         tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
                         let elapsed = before.elapsed().as_secs();
-
                         if elapsed > SLEEP_THRESHOLD_SECS {
-                            // System was asleep — reset accumulated time
                             accumulated_secs = 0;
-                            // Re-check if already ran today (date might have changed)
-                            if ran_today(&store_guard, &task_id_guard).await {
+                            if ran_today(&store, &task_id).await {
                                 return;
                             }
                             continue;
                         }
-
                         accumulated_secs += TICK_SECS;
                         if accumulated_secs >= required_secs {
                             break;
                         }
                     }
-
-                    // Final checks: enabled, not deleted, not yet ran today
-                    match store_guard.get_task(&task_id_guard).await {
+                    match store.get_task(&task_id).await {
                         Ok(Some(t)) if t.enabled => {
-                            if ran_today(&store_guard, &task_id_guard).await {
+                            if ran_today(&store, &task_id).await {
                                 return;
                             }
                         }
                         Ok(Some(_)) => {
-                            let _ = store.log_execution(&task_id, "skipped", None, None, None).await;
+                            let _ = store
+                                .log_execution(&task_id, "skipped", None, None, None)
+                                .await;
                             return;
                         }
                         _ => return,
                     }
-
-                    let result = executor.execute(&action).await;
-                    let (status, stdout, stderr, error) = match result {
-                        Ok(r) => ("success", r.stdout, r.stderr, None),
-                        Err(e) => ("failure", None, None, Some(e.to_string())),
-                    };
-                    if notify {
-                        send_run_notification(&app_handle, &task_name, status == "success");
-                    }
-                    let _ = store.log_execution(&task_id, status, stdout, stderr, error).await;
-                    let _ = store.update_last_run(&task_id, None).await;
+                    execute_and_log(
+                        &**executor,
+                        &store,
+                        &app_handle,
+                        &task_id,
+                        &task_name,
+                        notify,
+                        &action,
+                    )
+                    .await;
                 });
             }
         }
@@ -294,7 +279,30 @@ impl AppScheduler {
     }
 }
 
-fn send_run_notification(app: &tauri::AppHandle, task_name: &str, success: bool) {
+pub(crate) async fn execute_and_log(
+    executor: &dyn ActionExecutor,
+    store: &TaskStore,
+    app_handle: &tauri::AppHandle,
+    task_id: &str,
+    task_name: &str,
+    notify: bool,
+    action: &Action,
+) {
+    let result = executor.execute(action).await;
+    let (status, stdout, stderr, error) = match result {
+        Ok(r) => ("success", r.stdout, r.stderr, None),
+        Err(e) => ("failure", None, None, Some(e.to_string())),
+    };
+    if notify {
+        send_run_notification(app_handle, task_name, status == "success");
+    }
+    let _ = store
+        .log_execution(task_id, status, stdout, stderr, error)
+        .await;
+    let _ = store.update_last_run(task_id, None).await;
+}
+
+pub(crate) fn send_run_notification(app: &tauri::AppHandle, task_name: &str, success: bool) {
     let body = if success {
         format!("Executed: {}", task_name)
     } else {

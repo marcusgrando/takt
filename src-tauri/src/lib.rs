@@ -70,22 +70,21 @@ pub fn run() {
             // Async init — block until AppState is ready before IPC is available
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
-                let pool = crate::db::connect()
-                    .await
-                    .expect("DB connect failed");
+                let pool = crate::db::connect().await.expect("DB connect failed");
                 let store = Arc::new(TaskStore::new(pool));
                 let executor = Arc::new(current_executor(handle.clone()));
                 let scheduler = Arc::new(
-                    AppScheduler::new(Arc::clone(&store), handle.clone())
+                    AppScheduler::new(Arc::clone(&store), Arc::clone(&executor), handle.clone())
                         .await
                         .expect("Scheduler init failed"),
                 );
                 scheduler.start().await.expect("Scheduler start failed");
-                scheduler
-                    .load_all_tasks()
-                    .await
-                    .expect("Load tasks failed");
-                handle.manage(AppState { store, scheduler, executor });
+                scheduler.load_all_tasks().await.expect("Load tasks failed");
+                handle.manage(AppState {
+                    store,
+                    scheduler,
+                    executor,
+                });
             });
 
             setup_tray(app.handle())?;

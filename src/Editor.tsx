@@ -15,10 +15,6 @@ export default function Editor() {
     enabled: !!taskId,
   });
 
-  function handleSaved() {
-    // Window close is handled by TaskEditor after save
-  }
-
   if (taskId && isLoading) {
     return (
       <div className="flex items-center justify-center h-screen gap-2 text-muted-foreground">
@@ -39,10 +35,6 @@ export default function Editor() {
   }
 
   return (
-    <TaskEditor
-      task={task ?? undefined}
-      template={template ?? undefined}
-      onSaved={handleSaved}
-    />
+    <TaskEditor task={task ?? undefined} template={template ?? undefined} />
   );
 }

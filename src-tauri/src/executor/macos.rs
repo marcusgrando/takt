@@ -1,5 +1,5 @@
-use super::{ActionExecutor, ExecutionResult, ExecutorError};
 use super::keymap::resolve_keycode;
+use super::{ActionExecutor, ExecutionResult, ExecutorError};
 use crate::models::{Action, HttpMethod, KeyCombo, Modifier, Shell};
 use async_trait::async_trait;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
@@ -32,7 +32,9 @@ where
         let result = f();
         let _ = tx.send(result);
     })
-    .map_err(|e| ExecutorError::CommandFailed(format!("Failed to dispatch to main thread: {}", e)))?;
+    .map_err(|e| {
+        ExecutorError::CommandFailed(format!("Failed to dispatch to main thread: {}", e))
+    })?;
 
     rx.recv()
         .map_err(|_| ExecutorError::CommandFailed("Main thread channel closed".into()))?
@@ -40,50 +42,79 @@ where
 
 #[async_trait]
 impl ActionExecutor for MacosExecutor {
-    fn platform_name(&self) -> &'static str {
-        "macos"
-    }
-
     async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError> {
         match action {
-            Action::OpenFile { path, app, post_shortcuts, shortcut_delay_secs } => {
+            Action::OpenFile {
+                path,
+                app,
+                post_shortcuts,
+                shortcut_delay_secs,
+            } => {
                 let path = path.clone();
                 let app = app.clone();
                 run_on_main(&self.app_handle, move || open_file(&path, app.as_deref()))?;
                 if !post_shortcuts.is_empty() {
                     wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
-                Ok(ExecutionResult { stdout: None, stderr: None })
+                Ok(ExecutionResult {
+                    stdout: None,
+                    stderr: None,
+                })
             }
-            Action::OpenUrl { url, browser, post_shortcuts, shortcut_delay_secs } => {
+            Action::OpenUrl {
+                url,
+                browser,
+                post_shortcuts,
+                shortcut_delay_secs,
+            } => {
                 let url = url.clone();
                 let browser = browser.clone();
                 run_on_main(&self.app_handle, move || open_url(&url, browser.as_deref()))?;
                 if !post_shortcuts.is_empty() {
                     wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
-                Ok(ExecutionResult { stdout: None, stderr: None })
+                Ok(ExecutionResult {
+                    stdout: None,
+                    stderr: None,
+                })
             }
-            Action::OpenApp { app_path, post_shortcuts, shortcut_delay_secs } => {
+            Action::OpenApp {
+                app_path,
+                post_shortcuts,
+                shortcut_delay_secs,
+            } => {
                 let app_path = app_path.clone();
                 run_on_main(&self.app_handle, move || open_app(&app_path))?;
                 if !post_shortcuts.is_empty() {
                     wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
-                Ok(ExecutionResult { stdout: None, stderr: None })
+                Ok(ExecutionResult {
+                    stdout: None,
+                    stderr: None,
+                })
             }
             Action::Settings { pane_url } => {
                 let pane_url = pane_url.clone();
                 run_on_main(&self.app_handle, move || open_url(&pane_url, None))?;
-                Ok(ExecutionResult { stdout: None, stderr: None })
+                Ok(ExecutionResult {
+                    stdout: None,
+                    stderr: None,
+                })
             }
-            Action::RunCommand { command, args, shell } => run_command(command, args, shell),
+            Action::RunCommand {
+                command,
+                args,
+                shell,
+            } => run_command(command, args, shell),
             Action::Notify { title, body, sound } => {
                 send_notification(&self.app_handle, title, body, *sound)
             }
-            Action::Webhook { url, method, headers, body } => {
-                send_webhook(url, method, headers, body.as_deref()).await
-            }
+            Action::Webhook {
+                url,
+                method,
+                headers,
+                body,
+            } => send_webhook(url, method, headers, body.as_deref()).await,
         }
     }
 }
@@ -104,7 +135,10 @@ fn open_file(path: &str, app: Option<&str>) -> Result<(), ExecutorError> {
     } else {
         let opened = workspace.openURL(&file_url);
         if !opened {
-            return Err(ExecutorError::CommandFailed(format!("Failed to open file: {}", path)));
+            return Err(ExecutorError::CommandFailed(format!(
+                "Failed to open file: {}",
+                path
+            )));
         }
     }
     Ok(())
@@ -114,10 +148,18 @@ fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
     let workspace = NSWorkspace::sharedWorkspace();
     // Normalize: add https:// only if no scheme is present at all.
     // Schemes like x-apple.systempreferences: use ":" without "://".
-    let has_scheme = url.contains("://") || url.split_once(':').map_or(false, |(scheme, _)| {
-        !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+')
-    });
-    let normalized = if has_scheme { url.to_string() } else { format!("https://{}", url) };
+    let has_scheme = url.contains("://")
+        || url.split_once(':').is_some_and(|(scheme, _)| {
+            !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+')
+        });
+    let normalized = if has_scheme {
+        url.to_string()
+    } else {
+        format!("https://{}", url)
+    };
     let ns_url = NSURL::URLWithString(&NSString::from_str(&normalized))
         .ok_or_else(|| ExecutorError::CommandFailed(format!("Invalid URL: {}", url)))?;
 
@@ -131,7 +173,10 @@ fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
     } else {
         let opened = workspace.openURL(&ns_url);
         if !opened {
-            return Err(ExecutorError::CommandFailed(format!("Failed to open URL: {}", url)));
+            return Err(ExecutorError::CommandFailed(format!(
+                "Failed to open URL: {}",
+                url
+            )));
         }
     }
     Ok(())
@@ -156,7 +201,10 @@ fn resolve_app_url(app_name: &str) -> objc2::rc::Retained<NSURL> {
 
 // ── Post-shortcuts: wait + CGEvent ────────────────────────────────────
 
-async fn wait_and_send_shortcuts(shortcuts: &[KeyCombo], delay_secs: u64) -> Result<(), ExecutorError> {
+async fn wait_and_send_shortcuts(
+    shortcuts: &[KeyCombo],
+    delay_secs: u64,
+) -> Result<(), ExecutorError> {
     if !accessibility_is_trusted() {
         return Err(ExecutorError::AccessibilityRequired(
             "Grant Accessibility permission in System Settings → Privacy & Security → Accessibility"

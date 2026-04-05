@@ -23,7 +23,6 @@ pub enum ExecutorError {
 #[async_trait::async_trait]
 pub trait ActionExecutor: Send + Sync {
     async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError>;
-    fn platform_name(&self) -> &'static str;
 }
 
 #[cfg(target_os = "macos")]

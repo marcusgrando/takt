@@ -1,12 +1,8 @@
-use crate::models::{Schedule, Action, TaskDto, ExecutionLog};
+use crate::models::{Action, ExecutionLog, Schedule, TaskDto};
 use crate::AppState;
-use tauri::{AppHandle, State};
-use tauri_plugin_notification::NotificationExt;
 use objc2_app_kit::NSWorkspace;
-use objc2_foundation::{NSURL, NSString};
-
-const STATUS_SUCCESS: &str = "success";
-const STATUS_FAILURE: &str = "failure";
+use objc2_foundation::{NSString, NSURL};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn list_tasks(state: State<'_, AppState>) -> Result<Vec<TaskDto>, String> {
@@ -28,15 +24,30 @@ pub async fn create_task(
     action: Action,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    let task = state.store.create_task(name, description, run_if_missed.unwrap_or(true), notify_on_run.unwrap_or(false), schedule.clone(), action.clone())
-        .await.map_err(|e| e.to_string())?;
+    let task = state
+        .store
+        .create_task(
+            name,
+            description,
+            run_if_missed.unwrap_or(true),
+            notify_on_run.unwrap_or(false),
+            schedule.clone(),
+            action.clone(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
     if task.enabled {
-        state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;
+        state
+            .scheduler
+            .schedule_task(&task)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(task)
 }
 
 #[tauri::command(rename_all = "snake_case")]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_task(
     id: String,
     name: Option<String>,
@@ -48,46 +59,71 @@ pub async fn update_task(
     action: Option<Action>,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    let task = state.store.update_task(&id, name, description, enabled, run_if_missed, notify_on_run, schedule, action)
-        .await.map_err(|e| e.to_string())?;
-    state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
+    let task = state
+        .store
+        .update_task(
+            &id,
+            name,
+            description,
+            enabled,
+            run_if_missed,
+            notify_on_run,
+            schedule,
+            action,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    state
+        .scheduler
+        .remove_task(&id)
+        .await
+        .map_err(|e| e.to_string())?;
     if task.enabled {
-        state.scheduler.schedule_task(&task).await.map_err(|e| e.to_string())?;
+        state
+            .scheduler
+            .schedule_task(&task)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(task)
 }
 
 #[tauri::command]
 pub async fn delete_task(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.scheduler.remove_task(&id).await.map_err(|e| e.to_string())?;
-    state.store.delete_task(&id).await.map_err(|e| e.to_string())
+    state
+        .scheduler
+        .remove_task(&id)
+        .await
+        .map_err(|e| e.to_string())?;
+    state
+        .store
+        .delete_task(&id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn run_task_now(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let task = state.store.get_task(&id).await.map_err(|e| e.to_string())?
+pub async fn run_task_now(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let task = state
+        .store
+        .get_task(&id)
+        .await
+        .map_err(|e| e.to_string())?
         .ok_or_else(|| "Task not found".to_string())?;
-    let result = state.executor.execute(&task.action).await;
-    let (status, stdout, stderr, error) = match result {
-        Ok(r) => (STATUS_SUCCESS, r.stdout, r.stderr, None),
-        Err(e) => (STATUS_FAILURE, None, None, Some(e.to_string())),
-    };
-    if task.notify_on_run {
-        let body = if status == STATUS_SUCCESS {
-            format!("Executed: {}", task.name)
-        } else {
-            format!("Failed: {}", task.name)
-        };
-        let _ = app.notification()
-            .builder()
-            .title("cronmac")
-            .body(&body)
-            .show();
-    }
-    state.store.log_execution(&id, status, stdout, stderr, error)
-        .await.map_err(|e| e.to_string())?;
-    state.store.update_last_run(&id, None)
-        .await.map_err(|e| e.to_string())?;
+    crate::scheduler::execute_and_log(
+        &**state.executor,
+        &state.store,
+        &app,
+        &id,
+        &task.name,
+        task.notify_on_run,
+        &task.action,
+    )
+    .await;
     Ok(())
 }
 
@@ -97,8 +133,11 @@ pub async fn list_logs(
     limit: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ExecutionLog>, String> {
-    state.store.list_logs(task_id.as_deref(), limit.unwrap_or(50).min(500))
-        .await.map_err(|e| e.to_string())
+    state
+        .store
+        .list_logs(task_id.as_deref(), limit.unwrap_or(50).min(500))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 fn apps_for_url(url: &NSURL) -> Vec<String> {
@@ -109,7 +148,7 @@ fn apps_for_url(url: &NSURL) -> Vec<String> {
     for app_url in app_urls.to_vec() {
         if let Some(path) = app_url.path() {
             let path_str: String = path.to_string();
-            if let Some(name) = path_str.split('/').last() {
+            if let Some(name) = path_str.split('/').next_back() {
                 let clean = name.trim_end_matches(".app");
                 if !clean.is_empty() {
                     apps.push(clean.to_string());
