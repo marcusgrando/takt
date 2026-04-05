@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 fn normalize_cron(expr: &str) -> String {
@@ -50,6 +51,8 @@ pub struct AppScheduler {
     store: Arc<TaskStore>,
     app_handle: tauri::AppHandle,
     job_ids: Mutex<HashMap<String, Uuid>>,
+    /// Cancellation tokens for DailyFirstUse/OneShot spawned tasks
+    cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl AppScheduler {
@@ -65,6 +68,7 @@ impl AppScheduler {
             store,
             app_handle,
             job_ids: Mutex::new(HashMap::new()),
+            cancel_tokens: Mutex::new(HashMap::new()),
         })
     }
 
@@ -216,52 +220,23 @@ impl AppScheduler {
             }
             Schedule::DailyFirstUse { delay_minutes } => {
                 let required_secs: u64 = delay_minutes * 60;
+                let token = CancellationToken::new();
+                let child_token = token.child_token();
+                self.cancel_tokens
+                    .lock()
+                    .await
+                    .insert(task_id.clone(), token);
                 tokio::spawn(async move {
-                    if ran_today(&store, &task_id).await {
-                        return;
-                    }
-                    let required_secs = required_secs;
-                    const TICK_SECS: u64 = 30;
-                    const SLEEP_THRESHOLD_SECS: u64 = TICK_SECS * 3;
-                    let mut accumulated_secs: u64 = 0;
-                    loop {
-                        let before = std::time::Instant::now();
-                        tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
-                        let elapsed = before.elapsed().as_secs();
-                        if elapsed > SLEEP_THRESHOLD_SECS {
-                            accumulated_secs = 0;
-                            if ran_today(&store, &task_id).await {
-                                return;
-                            }
-                            continue;
-                        }
-                        accumulated_secs += TICK_SECS;
-                        if accumulated_secs >= required_secs {
-                            break;
-                        }
-                    }
-                    match store.get_task(&task_id).await {
-                        Ok(Some(t)) if t.enabled => {
-                            if ran_today(&store, &task_id).await {
-                                return;
-                            }
-                        }
-                        Ok(Some(_)) => {
-                            let _ = store
-                                .log_execution(&task_id, "skipped", None, None, None)
-                                .await;
-                            return;
-                        }
-                        _ => return,
-                    }
-                    execute_and_log(
-                        &**executor,
-                        &store,
-                        &app_handle,
-                        &task_id,
-                        &task_name,
+                    daily_first_use_loop(
+                        child_token,
+                        required_secs,
+                        executor,
+                        store,
+                        app_handle,
+                        task_id,
+                        task_name,
                         notify,
-                        &action,
+                        action,
                     )
                     .await;
                 });
@@ -275,7 +250,121 @@ impl AppScheduler {
         if let Some(job_uuid) = ids.remove(task_id) {
             self.inner.remove(&job_uuid).await?;
         }
+        drop(ids);
+        // Cancel any spawned background task (DailyFirstUse / OneShot)
+        let mut tokens = self.cancel_tokens.lock().await;
+        if let Some(token) = tokens.remove(task_id) {
+            token.cancel();
+        }
         Ok(())
+    }
+}
+
+/// Runs the DailyFirstUse logic in a loop that re-arms each day.
+/// Uses wall-clock elapsed time instead of a fixed threshold to detect sleep:
+/// only the actual elapsed time beyond the expected tick counts as accumulated.
+/// This avoids false sleep detection from macOS App Nap / timer throttling.
+#[allow(clippy::too_many_arguments)]
+async fn daily_first_use_loop(
+    cancel: CancellationToken,
+    required_secs: u64,
+    executor: Arc<Box<dyn ActionExecutor>>,
+    store: Arc<TaskStore>,
+    app_handle: tauri::AppHandle,
+    task_id: String,
+    task_name: String,
+    notify: bool,
+    action: Action,
+) {
+    const TICK_SECS: u64 = 30;
+    // If a tick takes more than 10 minutes, the system was truly asleep (not just throttled)
+    const SLEEP_THRESHOLD_SECS: u64 = 600;
+
+    loop {
+        // Skip if already ran today
+        if ran_today(&store, &task_id).await {
+            // Wait until just past midnight, then re-check
+            if wait_until_tomorrow_or_cancel(&cancel).await {
+                return; // cancelled
+            }
+            continue;
+        }
+
+        // Accumulate active time in TICK_SECS intervals
+        let mut accumulated_secs: u64 = 0;
+        loop {
+            let before = std::time::Instant::now();
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)) => {}
+            }
+            let elapsed = before.elapsed().as_secs();
+
+            if elapsed > SLEEP_THRESHOLD_SECS {
+                // System was truly asleep — reset
+                accumulated_secs = 0;
+                if ran_today(&store, &task_id).await {
+                    break;
+                }
+                continue;
+            }
+
+            // Count actual elapsed time (handles minor throttling gracefully)
+            accumulated_secs += elapsed.min(TICK_SECS * 2);
+            if accumulated_secs >= required_secs {
+                // Final guard: re-check enabled + not yet ran today
+                match store.get_task(&task_id).await {
+                    Ok(Some(t)) if t.enabled => {
+                        if ran_today(&store, &task_id).await {
+                            break;
+                        }
+                    }
+                    Ok(Some(_)) => {
+                        let _ = store
+                            .log_execution(&task_id, "skipped", None, None, None)
+                            .await;
+                        break;
+                    }
+                    _ => return, // deleted
+                }
+                execute_and_log(
+                    &**executor,
+                    &store,
+                    &app_handle,
+                    &task_id,
+                    &task_name,
+                    notify,
+                    &action,
+                )
+                .await;
+                break;
+            }
+        }
+
+        // Wait until tomorrow to re-arm
+        if wait_until_tomorrow_or_cancel(&cancel).await {
+            return; // cancelled
+        }
+    }
+}
+
+/// Sleep until just past local midnight. Returns true if cancelled.
+async fn wait_until_tomorrow_or_cancel(cancel: &CancellationToken) -> bool {
+    let now = Local::now();
+    let tomorrow = (now + chrono::Duration::days(1))
+        .date_naive()
+        .and_hms_opt(0, 0, 5)
+        .unwrap();
+    let tomorrow_local = tomorrow
+        .and_local_timezone(Local)
+        .single()
+        .unwrap_or_else(|| now + chrono::Duration::hours(24));
+    let duration = (tomorrow_local - now)
+        .to_std()
+        .unwrap_or(std::time::Duration::from_secs(3600));
+    tokio::select! {
+        _ = cancel.cancelled() => true,
+        _ = tokio::time::sleep(duration) => false,
     }
 }
 
