@@ -95,9 +95,10 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
   }, []);
 
   // Intercept window close — show native confirmation if dirty
+  const unlistenRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const win = getCurrentWebviewWindow();
-    const unlisten = win.onCloseRequested(async (event) => {
+    const promise = win.onCloseRequested(async (event) => {
       if (dirtyRef.current && !closingRef.current) {
         event.preventDefault();
         const ok = await confirm('You have unsaved changes. Close without saving?', {
@@ -106,11 +107,14 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
         });
         if (ok) {
           closingRef.current = true;
+          // Remove listener before closing to avoid re-entry
+          unlistenRef.current?.();
           await win.close();
         }
       }
     });
-    return () => { unlisten.then((fn) => fn()); };
+    promise.then((fn) => { unlistenRef.current = fn; });
+    return () => { promise.then((fn) => fn()); };
   }, []);
 
   function handleNameChange(value: string) {
