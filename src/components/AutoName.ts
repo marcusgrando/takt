@@ -63,7 +63,7 @@ function describeSchedule(schedule: Schedule): string {
     case 'Cron': {
       const state = parseCron(schedule.expression);
       switch (state.frequency) {
-        case 'hourly':
+        case 'interval':
           return state.intervalUnit === 'minutes'
             ? `Every ${state.intervalValue} min`
             : `Every ${state.intervalValue} hour${state.intervalValue > 1 ? 's' : ''}`;

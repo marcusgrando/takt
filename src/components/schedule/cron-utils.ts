@@ -1,11 +1,11 @@
-export type FrequencyType = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'custom';
+export type FrequencyType = 'interval' | 'daily' | 'weekly' | 'monthly' | 'custom';
 export type IntervalUnit = 'minutes' | 'hours';
 export type MonthlyMode = 'each' | 'onThe';
 export type OrdinalPosition = 'first' | 'second' | 'third' | 'fourth' | 'last';
 
 export interface RecurringState {
   frequency: FrequencyType;
-  // Hourly
+  // Interval
   intervalValue: number;
   intervalUnit: IntervalUnit;
   // Daily — not used (daily always fires every day)
@@ -47,7 +47,7 @@ const ORDINAL_MAP: Record<OrdinalPosition, string> = {
 
 export function buildCron(state: RecurringState): string {
   switch (state.frequency) {
-    case 'hourly': {
+    case 'interval': {
       if (state.intervalUnit === 'minutes') {
         return state.intervalValue === 1
           ? '* * * * *'
@@ -90,28 +90,28 @@ export function parseCron(expression: string): RecurringState {
 
   const [minField, hourField, domField, monField, dowField] = parts;
 
-  // Try to detect hourly: minute or hour field has */N or *, and dom/mon/dow are all *
+  // Try to detect interval: minute or hour field has */N or *, and dom/mon/dow are all *
   if (domField === '*' && monField === '*' && dowField === '*') {
-    // Hourly with minutes interval: */N * * * * or * * * * *
+    // Interval with minutes interval: */N * * * * or * * * * *
     if (hourField === '*' && (minField === '*' || minField.match(/^\*\/\d+$/))) {
       const minInterval = parseStepInterval(minField);
       if (minInterval !== null) {
         return {
           ...DEFAULT_RECURRING,
-          frequency: 'hourly',
+          frequency: 'interval',
           intervalUnit: 'minutes',
           intervalValue: minInterval,
         };
       }
     }
 
-    // Hourly with hours interval: 0 */N * * * or 0 * * * *
+    // Interval with hours interval: 0 */N * * * or 0 * * * *
     if (minField.match(/^\d+$/) && (hourField === '*' || hourField.match(/^\*\/\d+$/))) {
       const hourInterval = parseStepInterval(hourField);
       if (hourInterval !== null) {
         return {
           ...DEFAULT_RECURRING,
-          frequency: 'hourly',
+          frequency: 'interval',
           intervalUnit: 'hours',
           intervalValue: hourInterval,
         };

@@ -24,6 +24,10 @@ pub struct AppState {
 }
 
 pub fn run() {
+    // Kill any previously running instance before starting
+    #[cfg(target_os = "macos")]
+    kill_previous_instance();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
@@ -103,8 +107,16 @@ pub fn run() {
             commands::list_apps_for_file,
             commands::set_activation_policy,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // When macOS sends Reopen (user did `open cronmac.app` while running),
+            // relaunch as a new instance so kill_previous_instance can replace us.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                relaunch_and_exit(app);
+            }
+        });
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -170,6 +182,46 @@ fn show_near_tray(app: &AppHandle, tray_x: f64, tray_y: f64, tray_w: f64, tray_h
     let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Relaunch the app as a new instance and exit the current one.
+/// `open -n -a` forces macOS to start a fresh process even if one is running.
+/// The new process will call kill_previous_instance() to clean up.
+#[cfg(target_os = "macos")]
+fn relaunch_and_exit(app: &AppHandle) {
+    use objc2_foundation::NSBundle;
+
+    let bundle_path = NSBundle::mainBundle().bundlePath();
+    if std::process::Command::new("open")
+        .args(["-n", "-a"])
+        .arg(bundle_path.to_string())
+        .spawn()
+        .is_ok()
+    {
+        app.exit(0);
+        std::process::exit(0);
+    }
+}
+
+/// Kill any other running instance of this app so only one is active.
+/// Uses NSRunningApplication to find processes with the same bundle identifier.
+#[cfg(target_os = "macos")]
+fn kill_previous_instance() {
+    use objc2_app_kit::NSRunningApplication;
+    use objc2_foundation::NSBundle;
+
+    let Some(bundle_id) = NSBundle::mainBundle().bundleIdentifier() else {
+        return; // no bundle id (dev mode) — skip
+    };
+
+    let my_pid = std::process::id() as i32;
+    let running = NSRunningApplication::runningApplicationsWithBundleIdentifier(&bundle_id);
+    for app in running.to_vec() {
+        let pid = app.processIdentifier();
+        if pid != my_pid && pid > 0 {
+            app.forceTerminate();
+        }
+    }
 }
 
 /// Check Accessibility permission and prompt the user if not granted.

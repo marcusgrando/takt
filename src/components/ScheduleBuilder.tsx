@@ -37,7 +37,7 @@ const SCHEDULE_TYPES: { type: Schedule['type']; label: string }[] = [
 ];
 
 const FREQUENCIES: { value: FrequencyType; label: string }[] = [
-  { value: 'hourly', label: 'Hourly' },
+  { value: 'interval', label: 'Interval' },
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
@@ -149,8 +149,8 @@ export default function ScheduleBuilder({ value, onChange }: ScheduleBuilderProp
             </Select>
           </div>
 
-          {/* ── Hourly ── */}
-          {recurring.frequency === 'hourly' && (
+          {/* ── Interval ── */}
+          {recurring.frequency === 'interval' && (
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Every</span>
               <Input
