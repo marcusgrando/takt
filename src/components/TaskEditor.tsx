@@ -141,8 +141,11 @@ export default function TaskEditor({ task, template, onSaved }: TaskEditorProps)
       } else {
         await createTask({ name: name.trim(), description: description.trim() || undefined, run_if_missed: runIfMissed, notify_on_run: notifyOnRun, schedule, action });
       }
-      closingRef.current = true; // allow window to close without prompt
+      // Remove close interceptor and close the window directly
+      closingRef.current = true;
+      unlistenRef.current?.();
       onSaved?.();
+      await getCurrentWebviewWindow().close();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

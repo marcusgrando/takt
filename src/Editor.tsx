@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { getTask } from '@/lib/api';
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import TaskEditor from '@/components/TaskEditor';
 import type { TemplateName } from '@/components/TemplateGrid';
 
@@ -16,9 +15,8 @@ export default function Editor() {
     enabled: !!taskId,
   });
 
-  async function handleSaved() {
-    const win = getCurrentWebviewWindow();
-    await win.close();
+  function handleSaved() {
+    // Window close is handled by TaskEditor after save
   }
 
   if (taskId && isLoading) {
