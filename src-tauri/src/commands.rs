@@ -258,8 +258,10 @@ pub fn list_apps_for_file(path: String) -> Vec<String> {
 
 #[tauri::command]
 pub fn validate_cron(expression: String) -> Result<(), String> {
-    let expr = crate::scheduler::normalize_cron(&expression);
-    croner::Cron::new(&expr)
+    // Validate the raw 5-field expression — normalize_cron adds a seconds
+    // field that croner rejects when configured for 5-field mode.
+    croner::Cron::new(expression.trim())
+        .with_seconds_optional()
         .parse()
         .map(|_| ())
         .map_err(|e| format!("Invalid cron expression: {}", e))
