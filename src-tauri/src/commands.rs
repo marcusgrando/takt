@@ -28,7 +28,6 @@ pub async fn create_task(
     action: Action,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
-    eprintln!("[create_task] run_if_missed={:?}, notify_on_run={:?}", run_if_missed, notify_on_run);
     let task = state.store.create_task(name, description, run_if_missed.unwrap_or(true), notify_on_run.unwrap_or(false), schedule.clone(), action.clone())
         .await.map_err(|e| e.to_string())?;
     if task.enabled {
@@ -73,19 +72,17 @@ pub async fn run_task_now(id: String, app: AppHandle, state: State<'_, AppState>
         Ok(r) => (STATUS_SUCCESS, r.stdout, r.stderr, None),
         Err(e) => (STATUS_FAILURE, None, None, Some(e.to_string())),
     };
-    eprintln!("[run_task_now] task={}, notify_on_run={}, status={}", task.name, task.notify_on_run, status);
     if task.notify_on_run {
         let body = if status == STATUS_SUCCESS {
             format!("Executed: {}", task.name)
         } else {
             format!("Failed: {}", task.name)
         };
-        let result = app.notification()
+        let _ = app.notification()
             .builder()
             .title("cronmac")
             .body(&body)
             .show();
-        eprintln!("[run_task_now] notification result: {:?}", result);
     }
     state.store.log_execution(&id, status, stdout, stderr, error)
         .await.map_err(|e| e.to_string())?;
