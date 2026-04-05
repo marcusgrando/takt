@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Clock } from 'lucide-react';
-import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { WebviewWindow, getCurrentWebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow';
 import { invoke } from '@tauri-apps/api/core';
 import { queryClient } from '@/lib';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,11 @@ import HistoryView from './components/HistoryView';
 
 type View = 'list' | 'templates' | 'history';
 
+async function hasOpenEditors(): Promise<boolean> {
+  const all = await getAllWebviewWindows();
+  return all.some((w) => w.label.startsWith('editor-'));
+}
+
 async function openEditorWindow(params: { template?: TemplateName; taskId?: string }) {
   const query = new URLSearchParams();
   if (params.template) query.set('template', params.template);
@@ -20,8 +25,10 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
   const url = `/src/editor.html?${query.toString()}`;
 
   try {
-    // Show in Cmd+Tab while editor is open
-    await invoke('set_activation_policy', { policy: 'regular' });
+    // Show in Cmd+Tab when first editor opens
+    if (!(await hasOpenEditors())) {
+      await invoke('set_activation_policy', { policy: 'regular' });
+    }
 
     const win = new WebviewWindow(label, {
       url,
@@ -33,12 +40,25 @@ async function openEditorWindow(params: { template?: TemplateName; taskId?: stri
       decorations: true,
     });
 
-    // Refresh task list and hide from Cmd+Tab when editor closes
-    win.once('tauri://destroyed', () => {
+    // Handle async creation failure (WebviewWindow constructor doesn't throw)
+    win.once('tauri://error', async () => {
+      console.error('Editor window creation failed:', label);
+      if (!(await hasOpenEditors())) {
+        invoke('set_activation_policy', { policy: 'accessory' });
+      }
+    });
+
+    // Refresh task list and hide from Cmd+Tab when last editor closes
+    win.once('tauri://destroyed', async () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      invoke('set_activation_policy', { policy: 'accessory' });
+      if (!(await hasOpenEditors())) {
+        invoke('set_activation_policy', { policy: 'accessory' });
+      }
     });
   } catch (err) {
+    if (!(await hasOpenEditors())) {
+      invoke('set_activation_policy', { policy: 'accessory' });
+    }
     console.error('Failed to open editor window:', err);
   }
 }

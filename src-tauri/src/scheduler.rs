@@ -82,14 +82,33 @@ impl AppScheduler {
         for task in &tasks {
             if task.enabled {
                 if let Err(e) = self.schedule_task(task).await {
+                    let err_msg = e.to_string();
                     eprintln!(
                         "Warning: failed to schedule task '{}' ({}): {}",
-                        task.name, task.id, e
+                        task.name, task.id, err_msg
                     );
+                    // Log the error so it's visible in the history UI
+                    let _ = self
+                        .store
+                        .log_execution(&task.id, "schedule_error", None, None, Some(err_msg))
+                        .await;
+                    // Disable in DB so the UI reflects that this task isn't running.
+                    // User can re-enable to retry; the error will surface then.
+                    if let Err(dis_err) = self
+                        .store
+                        .update_task(&task.id, None, None, Some(false), None, None, None, None)
+                        .await
+                    {
+                        eprintln!(
+                            "Error: could not disable task '{}' ({}): {} — will be fixed on restart",
+                            task.name, task.id, dis_err
+                        );
+                    }
                 }
             }
         }
-        // Run catch-up for missed tasks after scheduling
+        // Re-fetch from DB so catch-up sees tasks disabled by scheduling failures
+        let tasks = self.store.list_tasks().await?;
         self.catch_up_missed(&tasks).await;
         Ok(())
     }

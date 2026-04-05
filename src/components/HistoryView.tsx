@@ -28,6 +28,7 @@ function formatRelativeTime(isoString: string): string {
 function StatusBadge({ status }: { status: ExecutionLog['status'] }) {
   if (status === 'success') return <Badge className="bg-green-500/12 text-green-700 dark:text-green-400 border-transparent">success</Badge>;
   if (status === 'failure') return <Badge variant="destructive">failure</Badge>;
+  if (status === 'schedule_error') return <Badge variant="destructive">schedule error</Badge>;
   return <Badge variant="secondary">skipped</Badge>;
 }
 

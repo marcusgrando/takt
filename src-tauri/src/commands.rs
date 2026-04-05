@@ -38,9 +38,19 @@ pub async fn create_task(
         .map_err(|e| e.to_string())?;
     if task.enabled {
         if let Err(e) = state.scheduler.schedule_task(&task).await {
-            // Rollback: remove persisted task if scheduling failed
-            let _ = state.store.delete_task(&task.id).await;
-            return Err(e.to_string());
+            let mut errors = vec![e.to_string()];
+            if let Err(rb_err) = state.store.delete_task(&task.id).await {
+                errors.push(format!("rollback delete failed: {}", rb_err));
+                // Can't delete — disable so it doesn't appear as active
+                if let Err(dis_err) = state
+                    .store
+                    .update_task(&task.id, None, None, Some(false), None, None, None, None)
+                    .await
+                {
+                    errors.push(format!("disable failed: {} — restart app to fix", dis_err));
+                }
+            }
+            return Err(errors.join("; "));
         }
     }
     Ok(task)
@@ -92,18 +102,22 @@ pub async fn update_task(
         Ok(t) => t,
         Err(e) => {
             // DB failed — restore old schedule
+            let mut errors = vec![e.to_string()];
             if old_task.enabled {
-                let _ = state.scheduler.schedule_task(&old_task).await;
+                if let Err(rb_err) = state.scheduler.schedule_task(&old_task).await {
+                    errors.push(format!("rollback re-schedule failed: {}", rb_err));
+                }
             }
-            return Err(e.to_string());
+            return Err(errors.join("; "));
         }
     };
 
     // Re-schedule with new config
     if task.enabled {
         if let Err(e) = state.scheduler.schedule_task(&task).await {
-            // Scheduling failed — revert DB to old state and restore old schedule
-            let _ = state
+            let mut errors = vec![e.to_string()];
+            // Try to revert DB to old state
+            let db_reverted = state
                 .store
                 .update_task(
                     &id,
@@ -116,10 +130,39 @@ pub async fn update_task(
                     Some(old_task.action.clone()),
                 )
                 .await;
-            if old_task.enabled {
-                let _ = state.scheduler.schedule_task(&old_task).await;
+            match db_reverted {
+                Ok(_) => {
+                    // DB reverted — try to restore old schedule
+                    if old_task.enabled {
+                        if let Err(rb_err) = state.scheduler.schedule_task(&old_task).await {
+                            errors.push(format!("rollback re-schedule failed: {}", rb_err));
+                            // No job in memory — must not stay enabled
+                            if let Err(dis_err) = state
+                                .store
+                                .update_task(&id, None, None, Some(false), None, None, None, None)
+                                .await
+                            {
+                                errors.push(format!(
+                                    "disable failed: {} — restart app to fix",
+                                    dis_err
+                                ));
+                            }
+                        }
+                    }
+                }
+                Err(rb_err) => {
+                    errors.push(format!("rollback failed: {}", rb_err));
+                    // No job in memory — must not stay enabled
+                    if let Err(dis_err) = state
+                        .store
+                        .update_task(&id, None, None, Some(false), None, None, None, None)
+                        .await
+                    {
+                        errors.push(format!("disable failed: {} — restart app to fix", dis_err));
+                    }
+                }
             }
-            return Err(e.to_string());
+            return Err(errors.join("; "));
         }
     }
     Ok(task)

@@ -266,12 +266,6 @@ fn run_command(
     args: &[String],
     shell: &Shell,
 ) -> Result<ExecutionResult, ExecutorError> {
-    let full_command = if args.is_empty() {
-        command.to_string()
-    } else {
-        format!("{} {}", command, args.join(" "))
-    };
-
     let (shell_bin, shell_flag) = match shell {
         Shell::Sh => ("/bin/sh", "-c"),
         Shell::Bash => ("/bin/bash", "-c"),
@@ -280,10 +274,39 @@ fn run_command(
         Shell::AppleScript => ("/usr/bin/osascript", "-e"),
     };
 
-    let output = Command::new(shell_bin)
-        .arg(shell_flag)
-        .arg(&full_command)
-        .output()?;
+    let mut cmd = Command::new(shell_bin);
+    match shell {
+        // POSIX shells: concat command + args into a single -c string.
+        // Args are NOT quoted — they're part of the shell command, so the user
+        // controls quoting and can use globs, variables, substitutions, etc.
+        Shell::Sh | Shell::Bash | Shell::Zsh => {
+            let full = if args.is_empty() {
+                command.to_string()
+            } else {
+                format!("{} {}", command, args.join(" "))
+            };
+            cmd.arg(shell_flag).arg(&full);
+        }
+        // Python: script via -c, then args as separate argv entries
+        Shell::Python => {
+            cmd.arg(shell_flag).arg(command);
+            for arg in args {
+                cmd.arg(arg);
+            }
+        }
+        // AppleScript: script via -e, then args after --
+        Shell::AppleScript => {
+            cmd.arg(shell_flag).arg(command);
+            if !args.is_empty() {
+                cmd.arg("--");
+                for arg in args {
+                    cmd.arg(arg);
+                }
+            }
+        }
+    }
+
+    let output = cmd.output()?;
     let stdout = if output.stdout.is_empty() {
         None
     } else {

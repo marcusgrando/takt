@@ -23,6 +23,20 @@ pub struct AppState {
     pub executor: Arc<Box<dyn ActionExecutor>>,
 }
 
+/// Show a native macOS alert dialog for fatal startup errors.
+/// Uses osascript since Tauri plugins aren't available yet at this point.
+fn show_fatal_error(msg: &str) {
+    let escaped = msg.replace('\\', "\\\\").replace('"', "\\\"");
+    let _ = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(format!(
+            "display dialog \"{}\" buttons {{\"OK\"}} default button \"OK\" with icon stop with title \"Takt\"",
+            escaped
+        ))
+        .output();
+    eprintln!("Fatal: {}", msg);
+}
+
 pub fn run() {
     // Kill any previously running instance before starting
     #[cfg(target_os = "macos")]
@@ -74,15 +88,34 @@ pub fn run() {
             // Async init — block until AppState is ready before IPC is available
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
-                let pool = crate::db::connect().await.expect("DB connect failed");
+                let pool = match crate::db::connect().await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        show_fatal_error(&format!("Database connection failed: {}", e));
+                        std::process::exit(1);
+                    }
+                };
                 let store = Arc::new(TaskStore::new(pool));
                 let executor = Arc::new(current_executor(handle.clone()));
                 let scheduler = Arc::new(
-                    AppScheduler::new(Arc::clone(&store), Arc::clone(&executor), handle.clone())
-                        .await
-                        .expect("Scheduler init failed"),
+                    match AppScheduler::new(
+                        Arc::clone(&store),
+                        Arc::clone(&executor),
+                        handle.clone(),
+                    )
+                    .await
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            show_fatal_error(&format!("Scheduler init failed: {}", e));
+                            std::process::exit(1);
+                        }
+                    },
                 );
-                scheduler.start().await.expect("Scheduler start failed");
+                if let Err(e) = scheduler.start().await {
+                    show_fatal_error(&format!("Scheduler start failed: {}", e));
+                    std::process::exit(1);
+                }
                 if let Err(e) = scheduler.load_all_tasks().await {
                     eprintln!("Warning: failed to load tasks: {}", e);
                 }
@@ -111,7 +144,10 @@ pub fn run() {
             commands::set_activation_policy,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
+        .unwrap_or_else(|e| {
+            show_fatal_error(&format!("Failed to build application: {}", e));
+            std::process::exit(1);
+        })
         .run(|app, event| {
             // When macOS sends Reopen (user did `open takt.app` while running),
             // relaunch as a new instance so kill_previous_instance can replace us.

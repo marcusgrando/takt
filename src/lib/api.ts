@@ -52,7 +52,7 @@ export interface ExecutionLog {
   task_id: string;
   started_at: string;
   finished_at: string;
-  status: 'success' | 'failure' | 'skipped';
+  status: 'success' | 'failure' | 'skipped' | 'schedule_error';
   stdout?: string;
   stderr?: string;
   error?: string;
