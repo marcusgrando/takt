@@ -18,7 +18,7 @@ pub async fn get_task(id: String, state: State<'_, AppState>) -> Result<Option<T
     state.store.get_task(&id).await.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn create_task(
     name: String,
     description: Option<String>,
@@ -28,6 +28,7 @@ pub async fn create_task(
     action: Action,
     state: State<'_, AppState>,
 ) -> Result<TaskDto, String> {
+    eprintln!("[create_task] run_if_missed={:?}, notify_on_run={:?}", run_if_missed, notify_on_run);
     let task = state.store.create_task(name, description, run_if_missed.unwrap_or(true), notify_on_run.unwrap_or(false), schedule.clone(), action.clone())
         .await.map_err(|e| e.to_string())?;
     if task.enabled {
@@ -36,7 +37,7 @@ pub async fn create_task(
     Ok(task)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn update_task(
     id: String,
     name: Option<String>,
@@ -72,17 +73,19 @@ pub async fn run_task_now(id: String, app: AppHandle, state: State<'_, AppState>
         Ok(r) => (STATUS_SUCCESS, r.stdout, r.stderr, None),
         Err(e) => (STATUS_FAILURE, None, None, Some(e.to_string())),
     };
+    eprintln!("[run_task_now] task={}, notify_on_run={}, status={}", task.name, task.notify_on_run, status);
     if task.notify_on_run {
         let body = if status == STATUS_SUCCESS {
             format!("Executed: {}", task.name)
         } else {
             format!("Failed: {}", task.name)
         };
-        let _ = app.notification()
+        let result = app.notification()
             .builder()
             .title("cronmac")
             .body(&body)
             .show();
+        eprintln!("[run_task_now] notification result: {:?}", result);
     }
     state.store.log_execution(&id, status, stdout, stderr, error)
         .await.map_err(|e| e.to_string())?;
@@ -91,7 +94,7 @@ pub async fn run_task_now(id: String, app: AppHandle, state: State<'_, AppState>
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn list_logs(
     task_id: Option<String>,
     limit: Option<i64>,
