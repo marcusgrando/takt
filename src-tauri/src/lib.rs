@@ -65,11 +65,21 @@ pub fn run() {
                     .skip_taskbar(true)
                     .build()?;
 
-            // Auto-dismiss: hide the popover when it loses focus (click outside)
+            // Auto-dismiss on focus loss + update tray icon on theme change
             let window_focus = window.clone();
+            let app_for_theme = app.handle().clone();
             window.on_window_event(move |event| {
-                if let tauri::WindowEvent::Focused(false) = event {
-                    let _ = window_focus.hide();
+                match event {
+                    tauri::WindowEvent::Focused(false) => {
+                        let _ = window_focus.hide();
+                    }
+                    tauri::WindowEvent::ThemeChanged(theme) => {
+                        let dark = *theme == tauri::Theme::Dark;
+                        if let Some(tray) = app_for_theme.tray_by_id("main-tray") {
+                            let _ = tray.set_icon(Some(tray_icon_for_theme(dark)));
+                        }
+                    }
+                    _ => {}
                 }
             });
 
@@ -158,13 +168,28 @@ pub fn run() {
         });
 }
 
+fn tray_icon_for_theme(dark: bool) -> tauri::image::Image<'static> {
+    if dark {
+        tauri::include_image!("icons/tray-dark.png")
+    } else {
+        tauri::include_image!("icons/tray-light.png")
+    }
+}
+
+fn is_dark_mode(app: &AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.theme().ok())
+        .map(|t| t == tauri::Theme::Dark)
+        .unwrap_or(true)
+}
+
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&quit])?;
 
-    TrayIconBuilder::new()
-        .icon(tauri::include_image!("icons/tray-icon.png"))
-        .icon_as_template(true)
+    TrayIconBuilder::with_id("main-tray")
+        .icon(tray_icon_for_theme(is_dark_mode(app)))
+        .icon_as_template(false)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
