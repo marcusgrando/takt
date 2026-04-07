@@ -51,6 +51,14 @@ struct TaskListView: View {
 
             // Footer
             HStack {
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Label("Quit", systemImage: "power")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
                 Spacer()
                 Button {
                     vm.currentView = .history

@@ -2,6 +2,7 @@
 # SwiftUI + Rust (libtakt via UniFFI) — macOS menu bar app
 
 APP_NAME := Takt
+BUILD_DIR := $(CURDIR)/build
 
 .DEFAULT_GOAL := help
 
@@ -22,12 +23,12 @@ build-rust: ## Build Rust static lib + generate Swift bindings
 	./scripts/build-rust.sh release
 
 .PHONY: build
-build: ## Build the app via Xcode (Release)
-	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Release build
+build: ## Build the app via Xcode (Release) → build/Takt.app
+	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Release -derivedDataPath "$(BUILD_DIR)" build
 
 .PHONY: build-debug
-build-debug: ## Build the app via Xcode (Debug)
-	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug build
+build-debug: ## Build the app via Xcode (Debug) → build/Takt.app
+	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug -derivedDataPath "$(BUILD_DIR)" build
 
 # ─── Code Quality ──────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ clean: ## Remove Rust build artifacts
 
 .PHONY: clean-xcode
 clean-xcode: ## Clean Xcode derived data
-	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt clean
+	rm -rf "$(BUILD_DIR)"
 
 .PHONY: clean-all
 clean-all: clean clean-xcode ## Remove all build artifacts

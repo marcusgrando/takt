@@ -5,6 +5,7 @@ target/
 macos/Takt/Generated/
 
 # Xcode
+build/
 macos/Takt.xcodeproj/xcuserdata/
 macos/Takt.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate

@@ -13,14 +13,64 @@ struct TaskItemView: View {
     @State private var itemError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // Row 1: name
-            Text(task.name)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 6) {
+            // Row 1: name + actions
+            HStack(spacing: 0) {
+                Text(task.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-            // Row 2: status + badge + toggle + actions
+                Spacer(minLength: 8)
+
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await handleRun() }
+                    } label: {
+                        if isRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isRunning)
+                    .help("Run now")
+
+                    Button {
+                        openEditor(EditorParams(taskId: task.id, template: nil))
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Edit")
+
+                    Button {
+                        confirmDelete = true
+                    } label: {
+                        if isDeleting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.red.opacity(0.7))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isDeleting)
+                    .help("Delete")
+                }
+            }
+
+            // Row 2: status + badge + toggle
             HStack(spacing: 8) {
                 Circle()
                     .fill(task.enabled ? Color.green : Color.secondary.opacity(0.25))
@@ -46,50 +96,6 @@ struct TaskItemView: View {
                 .labelsHidden()
 
                 Spacer()
-
-                HStack(spacing: 2) {
-                    Button {
-                        Task { await handleRun() }
-                    } label: {
-                        if isRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(width: 16, height: 16)
-                        } else {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10))
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(isRunning)
-                    .help("Run now")
-
-                    Button {
-                        openEditor(EditorParams(taskId: task.id, template: nil))
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 10))
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Edit")
-
-                    Button {
-                        confirmDelete = true
-                    } label: {
-                        if isDeleting {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(width: 16, height: 16)
-                        } else {
-                            Image(systemName: "trash")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(isDeleting)
-                    .help("Delete")
-                }
             }
 
             // Confirm delete

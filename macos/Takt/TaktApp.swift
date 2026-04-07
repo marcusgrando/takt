@@ -7,10 +7,11 @@ struct TaktApp: App {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        MenuBarExtra("Takt", systemImage: "clock") {
+        MenuBarExtra("Takt", image: "MenuBarIcon") {
             if let vm = appDelegate.vm {
                 TaskListView(vm: vm, openEditor: { params in
                     appDelegate.editorParams = params
+                    NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "editor")
                 })
             } else {
