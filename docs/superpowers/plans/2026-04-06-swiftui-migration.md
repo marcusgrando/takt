@@ -985,6 +985,9 @@ git commit -m "feat: add UniFFI derives to all FFI-crossing model types"
 **Files:**
 - Create: `libtakt/src/error.rs`
 - Modify: `libtakt/src/lib.rs` (add TaktCore)
+- Modify: `libtakt/src/db.rs` (add `connect_in_memory()` for tests)
+- Create: `libtakt/src/tests.rs` (TaktCore integration tests)
+- Test: `libtakt/src/tests.rs`
 
 - [ ] **Step 1: Create error.rs**
 
@@ -1383,7 +1386,15 @@ impl TaktCore {
 Run: `cargo build --package libtakt`
 Expected: BUILD SUCCESS
 
-- [ ] **Step 5: Write tests for start() idempotency and rollback**
+- [ ] **Step 5: Write TaktCore integration tests**
+
+> **Note on rollback testing:** The create_task/update_task rollback logic is a
+> verbatim port from `commands.rs` (already working in production). Testing the
+> rollback paths properly requires a mock scheduler that can fail on demand,
+> which would mean extracting a `TaskScheduler` trait from `AppScheduler` — too
+> much abstraction for a port. Rollback is validated manually in Phase 3 when
+> the app runs end-to-end. These tests cover the happy paths and initialization
+> edge cases.
 
 First, add a `connect_in_memory()` helper to `libtakt/src/db.rs` for test isolation:
 
@@ -1535,24 +1546,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_task_with_invalid_cron_rolls_back() {
+    async fn test_update_task_preserves_enabled_and_schedule() {
         let core = test_core().await;
 
-        // An expression that passes croner validation but fails in
-        // tokio-cron-scheduler (e.g., a past OneShot) or an intentionally
-        // broken schedule won't test rollback because create_task stores
-        // first, schedules second. Instead we verify the rollback path
-        // by creating a task, confirming it exists, then checking that
-        // a task with an invalid schedule is NOT left in DB.
         let params = CreateTaskParams {
-            name: "Bad Schedule".to_string(),
+            name: "Original".to_string(),
             description: None,
             run_if_missed: None,
             notify_on_run: None,
-            // This is a valid cron, so it won't fail scheduling.
-            // For a true rollback test, we'd need a mock scheduler.
-            // For now, test the happy path and trust the verbatim
-            // rollback logic from commands.rs.
             schedule: Schedule::Cron {
                 expression: "0 9 * * 1-5".to_string(),
             },
@@ -1566,7 +1567,7 @@ mod tests {
         let task = core.create_task(params).await.unwrap();
         assert!(task.enabled);
 
-        // Verify update preserves data
+        // Update only the name — enabled and schedule should be preserved
         let updated = core
             .update_task(UpdateTaskParams {
                 id: task.id.clone(),
@@ -1581,7 +1582,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.name, "Updated Name");
-        assert!(updated.enabled); // should still be enabled and scheduled
+        assert!(updated.enabled);
     }
 
     #[tokio::test]
@@ -1622,8 +1623,8 @@ Expected: File exists, several MB in size
 - [ ] **Step 8: Commit**
 
 ```bash
-git add libtakt/src/error.rs libtakt/src/lib.rs libtakt/src/models.rs
-git commit -m "feat: add TaktCore with UniFFI exports and full rollback logic from commands.rs"
+git add libtakt/src/error.rs libtakt/src/lib.rs libtakt/src/models.rs libtakt/src/db.rs libtakt/src/tests.rs
+git commit -m "feat: add TaktCore with UniFFI exports, integration tests, and CRUD logic from commands.rs"
 ```
 
 ---
