@@ -238,7 +238,9 @@ struct TaskEditorView: View {
 }
 
 /// Intercepts the native window close (red X button) to show unsaved changes dialog.
-/// Installs an NSWindowDelegate that returns false from windowShouldClose when dirty.
+/// Uses NSWindow.delegate interposition: stores the original SwiftUI delegate, forwards
+/// all calls to it, and only adds our windowShouldClose gate. Restores the original
+/// delegate when the view is removed to avoid lifecycle regressions.
 struct WindowCloseInterceptor: NSViewRepresentable {
     let isDirty: Bool
     let onAttemptClose: () -> Void
@@ -246,10 +248,7 @@ struct WindowCloseInterceptor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            context.coordinator.window = window
-            context.coordinator.originalDelegate = window.delegate
-            window.delegate = context.coordinator
+            context.coordinator.attach(to: view.window)
         }
         return view
     }
@@ -259,33 +258,56 @@ struct WindowCloseInterceptor: NSViewRepresentable {
         context.coordinator.onAttemptClose = onAttemptClose
     }
 
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     class Coordinator: NSObject, NSWindowDelegate {
         var isDirty = false
         var onAttemptClose: () -> Void = {}
-        weak var window: NSWindow?
-        weak var originalDelegate: NSWindowDelegate?
+        private weak var window: NSWindow?
+        private weak var originalDelegate: NSWindowDelegate?
+        private var attached = false
+
+        func attach(to window: NSWindow?) {
+            guard let window, !attached else { return }
+            originalDelegate = window.delegate
+            window.delegate = self
+            self.window = window
+            attached = true
+        }
+
+        func detach() {
+            guard attached, let window else { return }
+            // Restore original SwiftUI delegate
+            window.delegate = originalDelegate
+            originalDelegate = nil
+            attached = false
+        }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
             if isDirty {
                 onAttemptClose()
                 return false
             }
-            return true
+            // Consult original delegate too (in case SwiftUI has its own gate)
+            return originalDelegate?.windowShouldClose?(sender) ?? true
         }
 
-        // Forward other delegate methods to the original SwiftUI delegate
-        func windowWillClose(_ notification: Notification) {
-            originalDelegate?.windowWillClose?(notification)
+        // Forward all lifecycle events to the original SwiftUI delegate
+        override func responds(to aSelector: Selector!) -> Bool {
+            if super.responds(to: aSelector) { return true }
+            return originalDelegate?.responds(to: aSelector) ?? false
         }
 
-        func windowDidBecomeKey(_ notification: Notification) {
-            originalDelegate?.windowDidBecomeKey?(notification)
-        }
-
-        func windowDidResignKey(_ notification: Notification) {
-            originalDelegate?.windowDidResignKey?(notification)
+        override func forwardingTarget(for aSelector: Selector!) -> Any? {
+            if super.responds(to: aSelector) { return nil }
+            if originalDelegate?.responds(to: aSelector) == true {
+                return originalDelegate
+            }
+            return nil
         }
     }
 }
