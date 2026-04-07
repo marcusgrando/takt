@@ -126,6 +126,8 @@
 				"$(SRCROOT)/../libtakt/src/",
 				"$(SRCROOT)/../libtakt/Cargo.toml",
 				"$(SRCROOT)/../libtakt/migrations/",
+				"$(SRCROOT)/../Cargo.toml",
+				"$(SRCROOT)/../Cargo.lock",
 			);
 			name = "Build Rust (libtakt)";
 			outputPaths = (

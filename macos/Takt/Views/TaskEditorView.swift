@@ -268,7 +268,11 @@ struct WindowCloseInterceptor: NSViewRepresentable {
         var isDirty = false
         var onAttemptClose: () -> Void = {}
         private weak var window: NSWindow?
-        private weak var originalDelegate: NSWindowDelegate?
+        // Strong ref: NSWindow.delegate is unowned/unretained in AppKit,
+        // so the original SwiftUI delegate could be deallocated once we
+        // replace it. Holding a strong reference keeps it alive for
+        // forwarding and restoration in detach().
+        private var originalDelegate: NSWindowDelegate?
         private var attached = false
 
         func attach(to window: NSWindow?) {
