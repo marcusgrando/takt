@@ -34,7 +34,7 @@ cronmac/
 │   │   │   ├── mod.rs          # ActionExecutor trait (refactored: AppHandle → PlatformBridge)
 │   │   │   ├── macos.rs        # macOS impl (refactored: 3 substitutions)
 │   │   │   └── keymap.rs       # Key mapping (reuse, no changes)
-│   │   ├── platform.rs         # NEW: PlatformBridge trait (UniFFI callback interface)
+│   │   ├── platform.rs         # NEW: PlatformBridge trait (UniFFI with_foreign)
 │   │   └── launch_agent.rs     # Reuse, no changes
 │   ├── migrations/             # Copied from src-tauri/migrations/
 │   ├── Cargo.toml
@@ -101,7 +101,13 @@ macOS native APIs (UNNotification, DispatchQueue.main)
 Replaces the two uses of `tauri::AppHandle`:
 
 ```rust
-#[uniffi::export(callback_interface)]
+// Uses #[uniffi::export(with_foreign)] — the modern UniFFI model for traits
+// implemented in foreign languages. This gives Arc<dyn PlatformBridge> on the
+// Rust side (thread-safe, ref-counted). The older callback_interface model is
+// soft-deprecated and uses Box<dyn> which doesn't match our Arc usage.
+// See: https://mozilla.github.io/uniffi-rs/latest/types/interfaces.html
+
+#[uniffi::export(with_foreign)]
 pub trait PlatformBridge: Send + Sync {
     /// Send a native notification
     fn send_notification(&self, title: String, body: String, sound: bool);
@@ -112,7 +118,7 @@ pub trait PlatformBridge: Send + Sync {
 }
 ```
 
-Note: UniFFI callback interfaces don't support generic closures. Main thread dispatch uses a callback registry pattern:
+Note: UniFFI foreign traits don't support generic closures across FFI. Main thread dispatch uses a callback registry pattern:
 
 1. Rust stores the closure in a `static Mutex<HashMap<u64, Box<dyn FnOnce()>>>` registry with a numeric ID
 2. Rust calls `bridge.run_on_main_sync(id)` — this crosses FFI into Swift
@@ -127,15 +133,26 @@ Note: UniFFI callback interfaces don't support generic closures. Main thread dis
 ```rust
 #[derive(uniffi::Object)]
 pub struct TaktCore {
-    store: Arc<TaskStore>,
-    scheduler: Arc<AppScheduler>,
-    executor: Arc<Box<dyn ActionExecutor>>,
+    bridge: Arc<dyn PlatformBridge>,
+    // Populated by start(). Using OnceLock for safe one-time init.
+    store: OnceLock<Arc<TaskStore>>,
+    scheduler: OnceLock<Arc<AppScheduler>>,
+    executor: OnceLock<Arc<Box<dyn ActionExecutor>>>,
 }
 
 #[uniffi::export]
 impl TaktCore {
+    /// Synchronous constructor — creates the struct but does NOT connect DB
+    /// or start scheduler. UniFFI async primary constructors have "minimal"
+    /// support in bindings, so we use sync new() + async start().
+    /// See: https://mozilla.github.io/uniffi-rs/latest/udl/interfaces.html
     #[uniffi::constructor]
-    pub async fn new(bridge: Arc<dyn PlatformBridge>) -> Result<Self, TaktError>;
+    pub fn new(bridge: Arc<dyn PlatformBridge>) -> Self;
+
+    /// Async initialization — connects DB, creates TaskStore, starts scheduler,
+    /// loads all enabled tasks. Must be called after new() before any other method.
+    /// Replaces the block_on setup in the current lib.rs:100-137.
+    pub async fn start(&self) -> Result<(), TaktError>;
 
     // Task CRUD — these methods carry the DB↔scheduler consistency logic
     // currently in commands.rs. They are NOT thin wrappers over TaskStore.
@@ -195,7 +212,8 @@ Removed:
 - `tauri`, `tauri-build`, `tauri-plugin-notification`, `tauri-plugin-shell`, `tauri-plugin-dialog`
 
 Added:
-- `uniffi = { version = "0.28", features = ["cli"] }`
+- `uniffi = { version = "0.28", features = ["cli", "bindgen-swift"] }`
+- Binary target `uniffi-bindgen-swift` for proc-macro library mode bindgen
 
 Kept:
 - `tokio`, `sqlx`, `chrono`, `serde`, `serde_json`, `uuid`, `croner`, `tokio-cron-scheduler`, `tokio-util`, `reqwest`, `anyhow`, `thiserror`, `async-trait`, `dirs`, `objc2`, `objc2-foundation`, `objc2-app-kit`, `block2`, `core-graphics`
@@ -241,7 +259,7 @@ Kept:
 - Auto-name generation from action + schedule
 - Unsaved changes confirmation on dismiss
 
-**MacOSPlatformBridge** — Implements UniFFI callback interface:
+**MacOSPlatformBridge** — Implements UniFFI foreign trait (`with_foreign`):
 - `sendNotification()` → `UNUserNotificationCenter`
 - `runOnMainSync(callbackId:)` → `DispatchQueue.main.async` + callback registry (MUST be `.async`, not `.sync`, to prevent deadlock when Rust caller is on main thread; Rust awaits completion via `tokio::sync::oneshot` channel)
 
@@ -294,17 +312,68 @@ members = ["libtakt"]
 
 ### Build Script (`scripts/build-rust.sh`)
 
-1. `cargo build --release --target aarch64-apple-darwin` → produces `target/aarch64-apple-darwin/release/liblibtakt.a` (in workspace root `target/`, not `libtakt/target/`)
-2. `uniffi-bindgen generate` → produces `libtakt.swift`, `libtaktFFI.h`, `libtaktFFI.modulemap`
-3. Output copied to `macos/Takt/Generated/`
+Uses `uniffi-bindgen-swift` in **library mode** (required for proc-macro-based crates —
+the generator extracts interface metadata directly from the compiled `.a` artifact,
+not from UDL files). See: https://mozilla.github.io/uniffi-rs/next/swift/uniffi-bindgen-swift.html
+
+The libtakt crate includes a binary entry point for the bindgen:
+
+```rust
+// libtakt/src/bin/uniffi-bindgen-swift.rs
+fn main() { uniffi::uniffi_bindgen_swift() }
+```
+
+Full script:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TARGET="aarch64-apple-darwin"
+PROFILE="${1:-release}"
+LIB="$REPO_ROOT/target/$TARGET/$PROFILE/liblibtakt.a"
+OUT="$REPO_ROOT/macos/Takt/Generated"
+
+mkdir -p "$OUT" "$OUT/Headers" "$OUT/Modules"
+
+# 1. Build the static library
+cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --package libtakt --$PROFILE --target $TARGET
+
+# 2. Generate Swift source files (library mode)
+cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --package libtakt --bin uniffi-bindgen-swift -- \
+    "$LIB" "$OUT" --swift-sources
+
+# 3. Generate C headers
+cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --package libtakt --bin uniffi-bindgen-swift -- \
+    "$LIB" "$OUT/Headers" --headers
+
+# 4. Generate modulemap
+cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --package libtakt --bin uniffi-bindgen-swift -- \
+    "$LIB" "$OUT/Modules" --modulemap --modulemap-filename libtaktFFI.modulemap
+```
+
+Output:
+```
+macos/Takt/Generated/
+├── libtakt.swift              # Swift bindings (auto-generated)
+├── Headers/
+│   └── libtaktFFI.h           # C header
+└── Modules/
+    └── libtaktFFI.modulemap   # Module map for Xcode
+```
 
 ### Xcode Integration
 
 - **Build Phase** (Run Script, before Compile Sources): calls `build-rust.sh`
-- **Header Search Paths**: `$(SRCROOT)/Takt/Generated`
+- **Header Search Paths**: `$(SRCROOT)/Takt/Generated/Headers`
 - **Library Search Paths**: `$(SRCROOT)/../target/aarch64-apple-darwin/release` (workspace root `target/`, not `libtakt/target/`)
 - **Other Linker Flags**: `-llibtakt -lsqlite3 -framework Security -framework SystemConfiguration` (`-l` prepends `lib` automatically, so `-llibtakt` finds `liblibtakt.a`)
-- **Module Map**: points to `libtaktFFI.modulemap`
+- **Module Map** (Import Paths): `$(SRCROOT)/Takt/Generated/Modules`
 
 ### Signing & Distribution
 
@@ -321,8 +390,9 @@ Extract Rust code from `src-tauri/src/` to `libtakt/src/`, remove all Tauri depe
 
 Deliverables:
 1. New crate `libtakt/` with workspace config
-2. `platform.rs` — `PlatformBridge` trait with UniFFI callback interface
-3. `lib.rs` — `TaktCore` struct with all UniFFI exports
+2. `platform.rs` — `PlatformBridge` trait with `#[uniffi::export(with_foreign)]`
+3. `lib.rs` — `TaktCore` struct with sync `new()` + async `start()` + all UniFFI exports
+3b. `src/bin/uniffi-bindgen-swift.rs` — bindgen binary entry point
 4. `executor/macos.rs` refactored (AppHandle → PlatformBridge)
 5. `scheduler.rs` refactored (AppHandle → PlatformBridge)
 6. `commands.rs` deleted (replaced by TaktCore methods)
@@ -337,8 +407,8 @@ Validation: `cargo build --release` produces `liblibtakt.a`, `cargo test` passes
 Configure UniFFI, generate Swift bindings, create minimal Xcode project.
 
 Deliverables:
-1. `uniffi.toml` configured
-2. `scripts/build-rust.sh` functional
+1. `uniffi.toml` configured (module_name, ffi_module_name, generate_module_map, generate_codable_conformance for Swift Codable support on DTOs)
+2. `scripts/build-rust.sh` functional — uses `uniffi-bindgen-swift` in library mode with 3 separate invocations (swift-sources, headers, modulemap)
 3. Xcode project `macos/Takt.xcodeproj`
 4. Build phase linking `liblibtakt.a`
 5. `TaktCore+Bridge.swift` — PlatformBridge implementation
@@ -398,7 +468,7 @@ Deliverables:
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| UniFFI async support for callback interfaces | High | Use callback registry pattern with async dispatch + oneshot channel; validate in Phase 2 before building UI |
+| UniFFI foreign trait (`with_foreign`) + callback registry | High | Use `#[uniffi::export(with_foreign)]` (not deprecated `callback_interface`). Callback registry for main thread dispatch with async+oneshot. Validate in Phase 2 before building UI. |
 | `run_on_main` async contract change | High | The executor's `run_on_main` changes from sync (mpsc) to async (oneshot). All 4 call sites (open_file, open_url, open_app, Settings) must propagate. Test thoroughly in Phase 1 with mock bridge. |
 | DB↔scheduler consistency logic | High | The rollback chains in create/update (commands.rs:18-169) must be preserved verbatim in TaktCore methods. Add integration tests that simulate scheduler failures. |
 | `MenuBarExtra(.window)` customization limits | Medium | Fallback: manual `NSPopover` via NSApplicationDelegate |
