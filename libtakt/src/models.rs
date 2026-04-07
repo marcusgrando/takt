@@ -25,7 +25,7 @@ pub struct Task {
     pub next_run_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct TaskDto {
     pub id: String,
     pub name: String,
@@ -41,7 +41,7 @@ pub struct TaskDto {
     pub next_run_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 #[serde(tag = "type")]
 pub enum Schedule {
     Cron {
@@ -56,7 +56,7 @@ pub enum Schedule {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 pub enum Modifier {
     Cmd,
     Shift,
@@ -64,13 +64,13 @@ pub enum Modifier {
     Ctrl,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct KeyCombo {
     pub modifiers: Vec<Modifier>,
     pub key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 #[serde(tag = "type")]
 pub enum Action {
     OpenFile {
@@ -114,7 +114,7 @@ pub enum Action {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 pub enum Shell {
     Sh,
     Bash,
@@ -123,7 +123,7 @@ pub enum Shell {
     AppleScript,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum HttpMethod {
     GET,
@@ -133,7 +133,7 @@ pub enum HttpMethod {
     DELETE,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, uniffi::Record)]
 pub struct ExecutionLog {
     pub id: String,
     pub task_id: String,
@@ -143,6 +143,28 @@ pub struct ExecutionLog {
     pub stdout: Option<String>,
     pub stderr: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CreateTaskParams {
+    pub name: String,
+    pub description: Option<String>,
+    pub run_if_missed: Option<bool>,
+    pub notify_on_run: Option<bool>,
+    pub schedule: Schedule,
+    pub action: Action,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct UpdateTaskParams {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub enabled: Option<bool>,
+    pub run_if_missed: Option<bool>,
+    pub notify_on_run: Option<bool>,
+    pub schedule: Option<Schedule>,
+    pub action: Option<Action>,
 }
 
 impl Task {
