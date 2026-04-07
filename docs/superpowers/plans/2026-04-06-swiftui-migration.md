@@ -105,7 +105,7 @@ name = "uniffi-bindgen-swift"
 path = "src/bin/uniffi-bindgen-swift.rs"
 
 [dependencies]
-uniffi = { version = "0.28", features = ["cli"] }
+uniffi = { version = "0.28", features = ["cli", "bindgen-swift"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -1088,7 +1088,15 @@ impl TaktCore {
         }
     }
 
+    /// Async initialization. Idempotent — second call returns Ok immediately.
+    /// Resources are only created if OnceLock is empty, preventing duplicate
+    /// schedulers or DB pools from a repeated call.
     pub async fn start(&self) -> Result<(), TaktError> {
+        // Guard: if already initialized, return immediately
+        if self.store.get().is_some() {
+            return Ok(());
+        }
+
         let pool = db::connect().await?;
         let store = Arc::new(TaskStore::new(pool));
         let executor = Arc::new(current_executor(self.bridge.clone()));
@@ -1101,6 +1109,17 @@ impl TaktCore {
             .await
             .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?,
         );
+
+        // Set OnceLock BEFORE starting scheduler — if set() returns Err,
+        // another thread won the race; drop our resources and return Ok.
+        if self.store.set(store).is_err() {
+            return Ok(()); // another call won the race
+        }
+        let _ = self.executor.set(executor);
+        let _ = self.scheduler.set(scheduler);
+
+        // Now start the scheduler that is stored in the OnceLock
+        let scheduler = self.scheduler.get().unwrap();
         scheduler
             .start()
             .await
@@ -1108,10 +1127,6 @@ impl TaktCore {
         if let Err(e) = scheduler.load_all_tasks().await {
             eprintln!("Warning: failed to load tasks: {}", e);
         }
-
-        let _ = self.store.set(store);
-        let _ = self.scheduler.set(scheduler);
-        let _ = self.executor.set(executor);
 
         launch_agent::ensure_registered();
 
@@ -1366,18 +1381,127 @@ impl TaktCore {
 Run: `cargo build --package libtakt`
 Expected: BUILD SUCCESS
 
-- [ ] **Step 5: Run all tests**
+- [ ] **Step 5: Write tests for start() idempotency and rollback**
+
+Create `libtakt/src/tests.rs` with:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use crate::error::TaktError;
+    use crate::models::{Action, CreateTaskParams, Schedule, Shell};
+    use crate::platform::PlatformBridge;
+    use crate::TaktCore;
+    use std::sync::Arc;
+
+    /// Mock bridge that records calls but does nothing.
+    struct MockBridge;
+
+    impl PlatformBridge for MockBridge {
+        fn send_notification(&self, _title: String, _body: String, _sound: bool) {}
+        fn run_on_main_sync(&self, callback_id: u64) {
+            // Execute immediately on current thread (OK for tests)
+            crate::platform::execute_callback(callback_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_is_idempotent() {
+        let bridge = Arc::new(MockBridge);
+        let core = TaktCore::new(bridge);
+
+        // First start should succeed
+        core.start().await.unwrap();
+
+        // Second start should succeed without creating duplicate resources
+        core.start().await.unwrap();
+
+        // Core should be functional
+        let tasks = core.list_tasks().await.unwrap();
+        assert!(tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_methods_fail_before_start() {
+        let bridge = Arc::new(MockBridge);
+        let core = TaktCore::new(bridge);
+
+        // Should get NotInitialized error
+        let result = core.list_tasks().await;
+        assert!(matches!(result, Err(TaktError::NotInitialized)));
+    }
+
+    #[tokio::test]
+    async fn test_create_and_list_tasks() {
+        let bridge = Arc::new(MockBridge);
+        let core = TaktCore::new(bridge);
+        core.start().await.unwrap();
+
+        let params = CreateTaskParams {
+            name: "Test Task".to_string(),
+            description: None,
+            run_if_missed: None,
+            notify_on_run: None,
+            schedule: Schedule::Cron {
+                expression: "0 9 * * 1-5".to_string(),
+            },
+            action: Action::RunCommand {
+                command: "echo test".to_string(),
+                args: vec![],
+                shell: Shell::Sh,
+            },
+        };
+
+        let task = core.create_task(params).await.unwrap();
+        assert_eq!(task.name, "Test Task");
+        assert!(task.enabled);
+
+        let tasks = core.list_tasks().await.unwrap();
+        assert_eq!(tasks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_delete_task() {
+        let bridge = Arc::new(MockBridge);
+        let core = TaktCore::new(bridge);
+        core.start().await.unwrap();
+
+        let params = CreateTaskParams {
+            name: "Delete Me".to_string(),
+            description: None,
+            run_if_missed: None,
+            notify_on_run: None,
+            schedule: Schedule::DailyFirstUse { delay_minutes: 5 },
+            action: Action::Notify {
+                title: "Hi".to_string(),
+                body: "World".to_string(),
+                sound: false,
+            },
+        };
+
+        let task = core.create_task(params).await.unwrap();
+        core.delete_task(task.id).await.unwrap();
+
+        let tasks = core.list_tasks().await.unwrap();
+        assert!(tasks.is_empty());
+    }
+}
+```
+
+Register in lib.rs: add `#[cfg(test)] mod tests;` at the bottom.
+
+- [ ] **Step 6: Run all tests including new ones**
 
 Run: `cargo test --package libtakt`
-Expected: All tests pass
+Expected: All tests pass (store, db, executor serialization, AND the new TaktCore tests)
 
-- [ ] **Step 6: Verify static lib is produced**
+- [ ] **Step 7: Verify static lib is produced**
 
 Run: `cargo build --package libtakt --release --target aarch64-apple-darwin`
 Run: `ls -la target/aarch64-apple-darwin/release/liblibtakt.a`
 Expected: File exists, several MB in size
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add libtakt/src/error.rs libtakt/src/lib.rs libtakt/src/models.rs
@@ -1502,7 +1626,10 @@ Build Phases → Add Run Script Phase (before Compile Sources):
 
 - [ ] **Step 4: Add generated files to project**
 
-Drag `macos/Takt/Generated/` folder into the Xcode project navigator. Make sure "Create folder references" is selected (blue folder), not "Create groups".
+Add the generated Swift file to the project:
+- Drag `macos/Takt/Generated/LibTakt.swift` (or whatever UniFFI names it) into the Xcode project navigator as a **source file** in the app target (Create groups, NOT folder references). This compiles the bindings as part of the app — no `import LibTakt` needed, all types are available directly.
+- Do NOT add the Headers/ or Modules/ directories as source — those are consumed by the build settings (Header Search Paths, Import Paths) configured in Step 2.
+- The C header and modulemap enable the Swift compiler to find the FFI symbols in `liblibtakt.a`; the `.swift` file provides the Swift wrappers that call those symbols.
 
 - [ ] **Step 5: Write MacOSPlatformBridge**
 
@@ -1510,7 +1637,8 @@ Drag `macos/Takt/Generated/` folder into the Xcode project navigator. Make sure 
 // macos/Takt/TaktCore+Bridge.swift
 import Foundation
 import UserNotifications
-import LibTakt
+// No `// UniFFI types available directly — generated sources compiled in app target` — generated bindings are compiled as app target sources.
+// UniFFI types (TaktCore, PlatformBridgeProtocol, etc.) are available directly.
 
 final class MacOSPlatformBridge: PlatformBridgeProtocol, @unchecked Sendable {
     func sendNotification(title: String, body: String, sound: Bool) {
@@ -1539,7 +1667,8 @@ final class MacOSPlatformBridge: PlatformBridgeProtocol, @unchecked Sendable {
 ```swift
 // macos/Takt/TaktApp.swift
 import SwiftUI
-import LibTakt
+
+// No `// UniFFI types available directly — generated sources compiled in app target` needed — generated bindings are compiled as app target sources.
 
 @main
 struct TaktApp: App {
@@ -1601,7 +1730,7 @@ git commit -m "feat: create Xcode project with MacOSPlatformBridge and minimal s
 ```swift
 // macos/Takt/ViewModels/TaskListViewModel.swift
 import Foundation
-import LibTakt
+// UniFFI types available directly — generated sources compiled in app target
 
 @Observable
 final class TaskListViewModel {
@@ -1669,7 +1798,7 @@ final class TaskListViewModel {
 ```swift
 // macos/Takt/Views/TaskItemView.swift
 import SwiftUI
-import LibTakt
+// UniFFI types available directly — generated sources compiled in app target
 
 struct TaskItemView: View {
     let task: TaskDto
@@ -1731,7 +1860,7 @@ struct TaskItemView: View {
 ```swift
 // macos/Takt/Views/TaskListView.swift
 import SwiftUI
-import LibTakt
+// UniFFI types available directly — generated sources compiled in app target
 
 struct TaskListView: View {
     @Bindable var vm: TaskListViewModel
@@ -1800,33 +1929,52 @@ Replace the minimal version with the real app structure:
 ```swift
 // macos/Takt/TaktApp.swift
 import SwiftUI
-import LibTakt
+
+// NOTE: Do NOT use `// UniFFI types available directly — generated sources compiled in app target` — the generated Swift bindings are compiled
+// as part of the app target (added as source files), not as a separate module.
+// All UniFFI-generated types (TaktCore, TaskDto, etc.) are available directly.
 
 @main
 struct TaktApp: App {
-    @State private var vm: TaskListViewModel?
+    // Core is initialized eagerly at app launch via AppDelegate, NOT lazily
+    // inside the MenuBarExtra body. This ensures the scheduler, catch-up logic,
+    // and auto-start are active immediately — not deferred to first popover open.
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
         MenuBarExtra("Takt", systemImage: "clock") {
-            if let vm {
+            if let vm = appDelegate.vm {
                 TaskListView(vm: vm)
             } else {
                 ProgressView("Starting...")
                     .frame(width: 280, height: 400)
-                    .task { await initialize() }
             }
         }
         .menuBarExtraStyle(.window)
     }
+}
 
-    private func initialize() async {
-        let bridge = MacOSPlatformBridge()
-        let core = TaktCore(bridge: bridge)
-        do {
-            try await core.start()
-            vm = TaskListViewModel(core: core)
-        } catch {
-            print("Failed to initialize: \(error)")
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var vm: TaskListViewModel?
+    private var core: TaktCore?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hide from dock immediately
+        NSApp.setActivationPolicy(.accessory)
+
+        // Initialize core eagerly — scheduler starts at launch, not on first popover open
+        Task {
+            let bridge = MacOSPlatformBridge()
+            let core = TaktCore(bridge: bridge)
+            do {
+                try await core.start()
+                self.core = core
+                await MainActor.run {
+                    self.vm = TaskListViewModel(core: core)
+                }
+            } catch {
+                print("Failed to initialize: \(error)")
+            }
         }
     }
 }
