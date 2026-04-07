@@ -137,21 +137,39 @@ impl TaktCore {
     #[uniffi::constructor]
     pub async fn new(bridge: Arc<dyn PlatformBridge>) -> Result<Self, TaktError>;
 
-    // Task CRUD
+    // Task CRUD — these methods carry the DB↔scheduler consistency logic
+    // currently in commands.rs. They are NOT thin wrappers over TaskStore.
     pub async fn list_tasks(&self) -> Result<Vec<TaskDto>, TaktError>;
     pub async fn get_task(&self, id: String) -> Result<Option<TaskDto>, TaktError>;
+
+    /// Create task: store in DB → schedule → on schedule failure: rollback
+    /// delete from DB, or if delete fails, disable task.
+    /// Preserves the rollback chain from commands.rs:18-57.
     pub async fn create_task(&self, params: CreateTaskParams) -> Result<TaskDto, TaktError>;
+
+    /// Update task: snapshot old state → remove old schedule → update DB →
+    /// re-schedule → on failure at any step: revert DB to snapshot, restore
+    /// old schedule, or disable as last resort.
+    /// Preserves the full rollback logic from commands.rs:59-169.
     pub async fn update_task(&self, params: UpdateTaskParams) -> Result<TaskDto, TaktError>;
+
+    /// Delete task: remove from scheduler first, then delete from DB.
     pub async fn delete_task(&self, id: String) -> Result<(), TaktError>;
+
+    /// Run immediately: fetch task, execute via ActionExecutor, log result.
     pub async fn run_task_now(&self, id: String) -> Result<(), TaktError>;
 
     // Logs
     pub async fn list_logs(&self, task_id: Option<String>, limit: Option<i64>) -> Result<Vec<ExecutionLog>, TaktError>;
 
-    // System
-    pub fn list_browsers(&self) -> Vec<String>;
-    pub fn list_apps_for_file(&self, path: String) -> Vec<String>;
+    // System — validate_cron stays in Rust (uses croner crate)
     pub fn validate_cron(&self, expression: String) -> Result<(), TaktError>;
+
+    // NOTE: list_browsers() and list_apps_for_file() move to Swift.
+    // They call NSWorkspace which requires main thread. In the Tauri version
+    // they ran off main thread by accident. In SwiftUI, the ViewModel calls
+    // NSWorkspace directly on @MainActor — simpler, correct, no FFI needed.
+    // See "NSWorkspace lookups" section below.
 }
 ```
 
@@ -164,10 +182,10 @@ impl TaktCore {
 | `db.rs` | None | Pure SQLx + dirs crate. Same DB path `~/Library/Application Support/takt/`. |
 | `launch_agent.rs` | None | Uses `std::process::Command`. |
 | `executor/mod.rs` | Small | `current_executor(app_handle)` → `current_executor(bridge: Arc<dyn PlatformBridge>)` |
-| `executor/macos.rs` | Medium | 3 substitutions: `app.run_on_main_thread()` → `bridge.run_on_main_sync()`, `app.notification()` → `bridge.send_notification()`, `MacosExecutor { app_handle }` → `MacosExecutor { bridge }` |
+| `executor/macos.rs` | **High** | Contract change, not just API swap. The current `run_on_main()` helper (lines 25-41) is synchronous via `mpsc::sync_channel`. With async bridge dispatch, this becomes `async fn run_on_main()` using `tokio::sync::oneshot` for completion. All call sites (`open_file`, `open_url`, `open_app`, `Settings`) must propagate the async change. Additionally: `app.notification()` → `bridge.send_notification()`, `MacosExecutor { app_handle }` → `MacosExecutor { bridge }`. |
 | `executor/keymap.rs` | None | Pure key code mapping. |
 | `scheduler.rs` | Medium | `app_handle: tauri::AppHandle` → `bridge: Arc<dyn PlatformBridge>`. `send_run_notification()` uses bridge. |
-| `commands.rs` | **Delete** | Replaced by `TaktCore` UniFFI exports. |
+| `commands.rs` | **Delete** | Logic migrates to `TaktCore` methods — NOT discarded. The rollback/consistency chains in `create_task` (lines 39-54) and `update_task` (lines 72-168) must be preserved verbatim in the corresponding `TaktCore` methods. |
 | `lib.rs` | **Rewrite** | Was Tauri setup. Now `TaktCore` struct + UniFFI exports. |
 | `platform.rs` | **New** | `PlatformBridge` trait definition (~15 lines). |
 
@@ -225,7 +243,32 @@ Kept:
 
 **MacOSPlatformBridge** — Implements UniFFI callback interface:
 - `sendNotification()` → `UNUserNotificationCenter`
-- `runOnMainSync(callbackId:)` → `DispatchQueue.main.sync` + callback registry
+- `runOnMainSync(callbackId:)` → `DispatchQueue.main.async` + callback registry (MUST be `.async`, not `.sync`, to prevent deadlock when Rust caller is on main thread; Rust awaits completion via `tokio::sync::oneshot` channel)
+
+### NSWorkspace Lookups (moved from Rust to Swift)
+
+`list_browsers()` and `list_apps_for_file()` move out of libtakt into Swift. These are read-only NSWorkspace queries that need the main thread. In SwiftUI, the editor ViewModel calls them directly via `@MainActor`:
+
+```swift
+// In TaskEditorViewModel or a helper
+@MainActor
+static func listBrowsers() -> [String] {
+    let url = URL(string: "https://example.com")!
+    return NSWorkspace.shared.urlsForApplications(toOpen: url)
+        .compactMap { $0.deletingPathExtension().lastPathComponent }
+        .sorted()
+}
+
+@MainActor
+static func listAppsForFile(path: String) -> [String] {
+    let url = URL(fileURLWithPath: path)
+    return NSWorkspace.shared.urlsForApplications(toOpen: url)
+        .compactMap { $0.deletingPathExtension().lastPathComponent }
+        .sorted()
+}
+```
+
+This removes 2 functions from libtakt's FFI surface, 2 NSWorkspace dependencies from Rust (`commands.rs:223-257`), and eliminates the threading ambiguity.
 
 ### Complexity Removed
 
@@ -251,7 +294,7 @@ members = ["libtakt"]
 
 ### Build Script (`scripts/build-rust.sh`)
 
-1. `cargo build --release --target aarch64-apple-darwin` → produces `liblibtakt.a`
+1. `cargo build --release --target aarch64-apple-darwin` → produces `target/aarch64-apple-darwin/release/liblibtakt.a` (in workspace root `target/`, not `libtakt/target/`)
 2. `uniffi-bindgen generate` → produces `libtakt.swift`, `libtaktFFI.h`, `libtaktFFI.modulemap`
 3. Output copied to `macos/Takt/Generated/`
 
@@ -259,8 +302,8 @@ members = ["libtakt"]
 
 - **Build Phase** (Run Script, before Compile Sources): calls `build-rust.sh`
 - **Header Search Paths**: `$(SRCROOT)/Takt/Generated`
-- **Library Search Paths**: `$(SRCROOT)/../libtakt/target/aarch64-apple-darwin/release`
-- **Other Linker Flags**: `-lliblibtakt -lsqlite3 -framework Security -framework SystemConfiguration`
+- **Library Search Paths**: `$(SRCROOT)/../target/aarch64-apple-darwin/release` (workspace root `target/`, not `libtakt/target/`)
+- **Other Linker Flags**: `-llibtakt -lsqlite3 -framework Security -framework SystemConfiguration` (`-l` prepends `lib` automatically, so `-llibtakt` finds `liblibtakt.a`)
 - **Module Map**: points to `libtaktFFI.modulemap`
 
 ### Signing & Distribution
@@ -355,9 +398,10 @@ Deliverables:
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| UniFFI async support for callback interfaces | High | Use callback registry pattern with sync dispatch + channel; validate in Phase 2 |
+| UniFFI async support for callback interfaces | High | Use callback registry pattern with async dispatch + oneshot channel; validate in Phase 2 before building UI |
+| `run_on_main` async contract change | High | The executor's `run_on_main` changes from sync (mpsc) to async (oneshot). All 4 call sites (open_file, open_url, open_app, Settings) must propagate. Test thoroughly in Phase 1 with mock bridge. |
+| DB↔scheduler consistency logic | High | The rollback chains in create/update (commands.rs:18-169) must be preserved verbatim in TaktCore methods. Add integration tests that simulate scheduler failures. |
 | `MenuBarExtra(.window)` customization limits | Medium | Fallback: manual `NSPopover` via NSApplicationDelegate |
 | Cron builder complexity in SwiftUI | Medium | Mechanical port of `cron-utils.ts` — pure logic, no UI dependency |
 | SQLx migrations path change | Low | Copy `migrations/` directory; same schema, no new migrations |
 | Existing user DB must keep working | High | Same path, same schema — no breaking changes |
-| `run_on_main_sync` deadlock risk | Medium | Use `DispatchQueue.main.async` with semaphore instead of `.sync` if main thread is calling into Rust |
