@@ -85,7 +85,11 @@ impl TaktCore {
                     eprintln!("Warning: failed to load tasks: {}", e);
                 }
                 launch_agent::ensure_registered();
-                Ok::<_, TaktError>(InitializedState { store, scheduler, executor })
+                Ok::<_, TaktError>(InitializedState {
+                    store,
+                    scheduler,
+                    executor,
+                })
             })
             .await?;
         Ok(())
@@ -128,10 +132,15 @@ impl TaktCore {
                         .update_task(&task.id, None, None, Some(false), None, None, None, None)
                         .await
                     {
-                        errors.push(format!("disable failed: {} \u{2014} restart app to fix", dis_err));
+                        errors.push(format!(
+                            "disable failed: {} \u{2014} restart app to fix",
+                            dis_err
+                        ));
                     }
                 }
-                return Err(TaktError::Scheduler { msg: errors.join("; ") });
+                return Err(TaktError::Scheduler {
+                    msg: errors.join("; "),
+                });
             }
         }
         Ok(task)
@@ -147,7 +156,9 @@ impl TaktCore {
         let old_task = store
             .get_task(&params.id)
             .await?
-            .ok_or_else(|| TaktError::NotFound { msg: "Task not found".to_string() })?;
+            .ok_or_else(|| TaktError::NotFound {
+                msg: "Task not found".to_string(),
+            })?;
 
         // Remove old schedule
         scheduler
@@ -158,9 +169,14 @@ impl TaktCore {
         // Update DB
         let task = match store
             .update_task(
-                &params.id, params.name, params.description,
-                params.enabled, params.run_if_missed, params.notify_on_run,
-                params.schedule, params.action,
+                &params.id,
+                params.name,
+                params.description,
+                params.enabled,
+                params.run_if_missed,
+                params.notify_on_run,
+                params.schedule,
+                params.action,
             )
             .await
         {
@@ -173,7 +189,9 @@ impl TaktCore {
                         errors.push(format!("rollback re-schedule failed: {}", rb_err));
                     }
                 }
-                return Err(TaktError::Database { msg: errors.join("; ") });
+                return Err(TaktError::Database {
+                    msg: errors.join("; "),
+                });
             }
         };
 
@@ -185,9 +203,12 @@ impl TaktCore {
                 let db_reverted = store
                     .update_task(
                         &params.id,
-                        Some(old_task.name.clone()), Some(old_task.description.clone()),
-                        Some(old_task.enabled), Some(old_task.run_if_missed),
-                        Some(old_task.notify_on_run), Some(old_task.schedule.clone()),
+                        Some(old_task.name.clone()),
+                        Some(old_task.description.clone()),
+                        Some(old_task.enabled),
+                        Some(old_task.run_if_missed),
+                        Some(old_task.notify_on_run),
+                        Some(old_task.schedule.clone()),
                         Some(old_task.action.clone()),
                     )
                     .await;
@@ -199,10 +220,22 @@ impl TaktCore {
                                 errors.push(format!("rollback re-schedule failed: {}", rb_err));
                                 // No job in memory — must not stay enabled
                                 if let Err(dis_err) = store
-                                    .update_task(&params.id, None, None, Some(false), None, None, None, None)
+                                    .update_task(
+                                        &params.id,
+                                        None,
+                                        None,
+                                        Some(false),
+                                        None,
+                                        None,
+                                        None,
+                                        None,
+                                    )
                                     .await
                                 {
-                                    errors.push(format!("disable failed: {} \u{2014} restart app to fix", dis_err));
+                                    errors.push(format!(
+                                        "disable failed: {} \u{2014} restart app to fix",
+                                        dis_err
+                                    ));
                                 }
                             }
                         }
@@ -211,21 +244,37 @@ impl TaktCore {
                         errors.push(format!("rollback failed: {}", rb_err));
                         // No job in memory — must not stay enabled
                         if let Err(dis_err) = store
-                            .update_task(&params.id, None, None, Some(false), None, None, None, None)
+                            .update_task(
+                                &params.id,
+                                None,
+                                None,
+                                Some(false),
+                                None,
+                                None,
+                                None,
+                                None,
+                            )
                             .await
                         {
-                            errors.push(format!("disable failed: {} \u{2014} restart app to fix", dis_err));
+                            errors.push(format!(
+                                "disable failed: {} \u{2014} restart app to fix",
+                                dis_err
+                            ));
                         }
                     }
                 }
-                return Err(TaktError::Scheduler { msg: errors.join("; ") });
+                return Err(TaktError::Scheduler {
+                    msg: errors.join("; "),
+                });
             }
         }
         Ok(task)
     }
 
     pub async fn delete_task(&self, id: String) -> Result<(), TaktError> {
-        self.scheduler()?.remove_task(&id).await
+        self.scheduler()?
+            .remove_task(&id)
+            .await
             .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?;
         self.store()?.delete_task(&id).await?;
         Ok(())
@@ -234,20 +283,34 @@ impl TaktCore {
     pub async fn run_task_now(&self, id: String) -> Result<(), TaktError> {
         let store = self.store()?;
         let executor = self.executor_ref()?;
-        let task = store.get_task(&id).await?
-            .ok_or_else(|| TaktError::NotFound { msg: "Task not found".to_string() })?;
+        let task = store
+            .get_task(&id)
+            .await?
+            .ok_or_else(|| TaktError::NotFound {
+                msg: "Task not found".to_string(),
+            })?;
         scheduler::execute_and_log(
-            &**executor, store, &*self.bridge,
-            &id, &task.name, task.notify_on_run, &task.action,
+            &**executor,
+            store,
+            &*self.bridge,
+            &id,
+            &task.name,
+            task.notify_on_run,
+            &task.action,
         )
         .await
         .map_err(|msg| TaktError::Execution { msg })
     }
 
     pub async fn list_logs(
-        &self, task_id: Option<String>, limit: Option<i64>,
+        &self,
+        task_id: Option<String>,
+        limit: Option<i64>,
     ) -> Result<Vec<ExecutionLog>, TaktError> {
-        Ok(self.store()?.list_logs(task_id.as_deref(), limit.unwrap_or(50).min(500)).await?)
+        Ok(self
+            .store()?
+            .list_logs(task_id.as_deref(), limit.unwrap_or(50).min(500))
+            .await?)
     }
 
     pub fn validate_cron(&self, expression: String) -> Result<(), TaktError> {
@@ -255,7 +318,9 @@ impl TaktCore {
             .with_seconds_optional()
             .parse()
             .map(|_| ())
-            .map_err(|e| TaktError::Validation { msg: format!("Invalid cron expression: {}", e) })
+            .map_err(|e| TaktError::Validation {
+                msg: format!("Invalid cron expression: {}", e),
+            })
     }
 }
 
@@ -269,13 +334,23 @@ impl TaktCore {
                 let store = Arc::new(TaskStore::new(pool));
                 let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
-                    AppScheduler::new(Arc::clone(&store), Arc::clone(&executor), Arc::clone(&bridge))
-                        .await
-                        .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?,
+                    AppScheduler::new(
+                        Arc::clone(&store),
+                        Arc::clone(&executor),
+                        Arc::clone(&bridge),
+                    )
+                    .await
+                    .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?,
                 );
-                scheduler.start().await
+                scheduler
+                    .start()
+                    .await
                     .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?;
-                Ok::<_, TaktError>(InitializedState { store, scheduler, executor })
+                Ok::<_, TaktError>(InitializedState {
+                    store,
+                    scheduler,
+                    executor,
+                })
             })
             .await?;
         Ok(())

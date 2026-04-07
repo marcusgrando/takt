@@ -52,7 +52,9 @@ mod tests {
             description: None,
             run_if_missed: None,
             notify_on_run: None,
-            schedule: Schedule::Cron { expression: "0 9 * * 1-5".to_string() },
+            schedule: Schedule::Cron {
+                expression: "0 9 * * 1-5".to_string(),
+            },
             action: Action::RunCommand {
                 command: "echo test".to_string(),
                 args: vec![],
@@ -71,9 +73,15 @@ mod tests {
         let core = test_core().await;
         let params = CreateTaskParams {
             name: "Delete Me".to_string(),
-            description: None, run_if_missed: None, notify_on_run: None,
+            description: None,
+            run_if_missed: None,
+            notify_on_run: None,
             schedule: Schedule::DailyFirstUse { delay_minutes: 5 },
-            action: Action::Notify { title: "Hi".to_string(), body: "World".to_string(), sound: false },
+            action: Action::Notify {
+                title: "Hi".to_string(),
+                body: "World".to_string(),
+                sound: false,
+            },
         };
         let task = core.create_task(params).await.unwrap();
         core.delete_task(task.id).await.unwrap();
@@ -86,19 +94,32 @@ mod tests {
         let core = test_core().await;
         let params = CreateTaskParams {
             name: "Original".to_string(),
-            description: None, run_if_missed: None, notify_on_run: None,
-            schedule: Schedule::Cron { expression: "0 9 * * 1-5".to_string() },
+            description: None,
+            run_if_missed: None,
+            notify_on_run: None,
+            schedule: Schedule::Cron {
+                expression: "0 9 * * 1-5".to_string(),
+            },
             action: Action::RunCommand {
-                command: "echo test".to_string(), args: vec![], shell: Shell::Sh,
+                command: "echo test".to_string(),
+                args: vec![],
+                shell: Shell::Sh,
             },
         };
         let task = core.create_task(params).await.unwrap();
-        let updated = core.update_task(UpdateTaskParams {
-            id: task.id.clone(),
-            name: Some("Updated".to_string()),
-            description: None, enabled: None, run_if_missed: None,
-            notify_on_run: None, schedule: None, action: None,
-        }).await.unwrap();
+        let updated = core
+            .update_task(UpdateTaskParams {
+                id: task.id.clone(),
+                name: Some("Updated".to_string()),
+                description: None,
+                enabled: None,
+                run_if_missed: None,
+                notify_on_run: None,
+                schedule: None,
+                action: None,
+            })
+            .await
+            .unwrap();
         assert_eq!(updated.name, "Updated");
         assert!(updated.enabled);
     }
@@ -106,12 +127,18 @@ mod tests {
     #[tokio::test]
     async fn test_update_nonexistent_returns_not_found() {
         let core = test_core().await;
-        let result = core.update_task(UpdateTaskParams {
-            id: "nonexistent".to_string(),
-            name: Some("Nope".to_string()),
-            description: None, enabled: None, run_if_missed: None,
-            notify_on_run: None, schedule: None, action: None,
-        }).await;
+        let result = core
+            .update_task(UpdateTaskParams {
+                id: "nonexistent".to_string(),
+                name: Some("Nope".to_string()),
+                description: None,
+                enabled: None,
+                run_if_missed: None,
+                notify_on_run: None,
+                schedule: None,
+                action: None,
+            })
+            .await;
         assert!(matches!(result, Err(TaktError::NotFound { .. })));
     }
 }

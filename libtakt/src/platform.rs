@@ -62,5 +62,6 @@ where
     });
     let id = register_callback(callback);
     bridge.run_on_main_sync(id);
-    rx.await.expect("Main thread callback was dropped without executing")
+    rx.await
+        .expect("Main thread callback was dropped without executing")
 }

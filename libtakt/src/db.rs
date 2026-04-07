@@ -42,9 +42,7 @@ fn db_path() -> anyhow::Result<PathBuf> {
 
 #[cfg(test)]
 pub async fn connect_in_memory() -> anyhow::Result<SqlitePool> {
-    let pool = SqlitePoolOptions::new()
-        .connect("sqlite::memory:")
-        .await?;
+    let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
     sqlx::query("PRAGMA foreign_keys = ON;")
         .execute(&pool)
         .await?;

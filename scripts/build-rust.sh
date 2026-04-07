@@ -8,13 +8,16 @@ export PATH="$HOME/.cargo/bin:$PATH"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="aarch64-apple-darwin"
 
-# Support Xcode configuration: map Debug/Release to cargo profile
-if [ "${CONFIGURATION:-}" = "Debug" ]; then
-    PROFILE="debug"
-    CARGO_FLAG=""
+# Resolve profile: Xcode sets CONFIGURATION, CLI passes as $1
+PROFILE="${1:-release}"
+[ "${CONFIGURATION:-}" = "Debug" ] && PROFILE="debug"
+
+# cargo uses --release flag; debug is the default (no flag)
+if [ "$PROFILE" = "release" ]; then
+    CARGO_FLAG="--release"
 else
-    PROFILE="${1:-release}"
-    CARGO_FLAG="--$PROFILE"
+    CARGO_FLAG=""
+    PROFILE="debug"
 fi
 
 LIB="$REPO_ROOT/target/$TARGET/$PROFILE/liblibtakt.a"

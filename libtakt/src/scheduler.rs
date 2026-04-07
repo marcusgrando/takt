@@ -1,7 +1,7 @@
 use crate::executor::ActionExecutor;
 use crate::models::{Action, Schedule, TaskDto};
-use crate::store::TaskStore;
 use crate::platform::PlatformBridge;
+use crate::store::TaskStore;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -147,13 +147,7 @@ impl AppScheduler {
                 let action = task.action.clone();
                 tokio::spawn(async move {
                     let _ = execute_and_log(
-                        &*executor,
-                        &store,
-                        &*bridge,
-                        &task_id,
-                        &task_name,
-                        notify,
-                        &action,
+                        &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
                     )
                     .await;
                 });
@@ -195,13 +189,7 @@ impl AppScheduler {
                             _ => return,
                         }
                         let _ = execute_and_log(
-                            &*executor,
-                            &store,
-                            &*bridge,
-                            &task_id,
-                            &task_name,
-                            notify,
-                            &action,
+                            &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
                         )
                         .await;
                     })
@@ -241,13 +229,7 @@ impl AppScheduler {
                             }
                         }
                         let _ = execute_and_log(
-                            &*executor,
-                            &store,
-                            &*bridge,
-                            &task_id,
-                            &task_name,
-                            notify,
-                            &action,
+                            &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
                         )
                         .await;
                         tokens.lock().await.remove(&task_id);
@@ -364,13 +346,7 @@ async fn daily_first_use_loop(
                     _ => return, // deleted
                 }
                 let _ = execute_and_log(
-                    &*executor,
-                    &store,
-                    &*bridge,
-                    &task_id,
-                    &task_name,
-                    notify,
-                    &action,
+                    &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
                 )
                 .await;
                 break;

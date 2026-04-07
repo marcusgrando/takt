@@ -196,6 +196,10 @@ struct TaskEditorView: View {
                     .keyboardShortcut("w", modifiers: .command)
             }
         }
+        // Intercept native window close (red X button) via NSWindow delegate
+        .background(WindowCloseInterceptor(isDirty: vm.isDirty, onAttemptClose: {
+            showDiscardAlert = true
+        }))
         .confirmationDialog(
             "You have unsaved changes. Close without saving?",
             isPresented: $showDiscardAlert,
@@ -229,6 +233,59 @@ struct TaskEditorView: View {
         if success {
             onSave()
             dismiss()
+        }
+    }
+}
+
+/// Intercepts the native window close (red X button) to show unsaved changes dialog.
+/// Installs an NSWindowDelegate that returns false from windowShouldClose when dirty.
+struct WindowCloseInterceptor: NSViewRepresentable {
+    let isDirty: Bool
+    let onAttemptClose: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            context.coordinator.window = window
+            context.coordinator.originalDelegate = window.delegate
+            window.delegate = context.coordinator
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.isDirty = isDirty
+        context.coordinator.onAttemptClose = onAttemptClose
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    class Coordinator: NSObject, NSWindowDelegate {
+        var isDirty = false
+        var onAttemptClose: () -> Void = {}
+        weak var window: NSWindow?
+        weak var originalDelegate: NSWindowDelegate?
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if isDirty {
+                onAttemptClose()
+                return false
+            }
+            return true
+        }
+
+        // Forward other delegate methods to the original SwiftUI delegate
+        func windowWillClose(_ notification: Notification) {
+            originalDelegate?.windowWillClose?(notification)
+        }
+
+        func windowDidBecomeKey(_ notification: Notification) {
+            originalDelegate?.windowDidBecomeKey?(notification)
+        }
+
+        func windowDidResignKey(_ notification: Notification) {
+            originalDelegate?.windowDidResignKey?(notification)
         }
     }
 }
