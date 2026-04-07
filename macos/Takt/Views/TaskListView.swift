@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct TaskListView: View {
-    @Bindable var vm: TaskListViewModel
+    var vm: TaskListViewModel
+    var openEditor: (EditorParams) -> Void
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -17,6 +18,7 @@ struct TaskListView: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(.borderless)
+                .keyboardShortcut("n", modifiers: .command)
             }
             .padding(.horizontal, 16)
             .frame(height: 48)
@@ -31,7 +33,7 @@ struct TaskListView: View {
                 case .templates:
                     TemplateGridView(
                         onSelect: { template in
-                            openWindow(value: EditorParams(taskId: nil, template: template))
+                            openEditor(EditorParams(taskId: nil, template: template))
                             vm.currentView = .tasks
                         },
                         onBack: { vm.currentView = .tasks }
@@ -112,7 +114,7 @@ struct TaskListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(vm.tasks, id: \.id) { task in
-                        TaskItemView(task: task, vm: vm)
+                        TaskItemView(task: task, vm: vm, openEditor: openEditor)
                         Divider()
                     }
                 }

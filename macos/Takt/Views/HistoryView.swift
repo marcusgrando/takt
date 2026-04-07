@@ -74,6 +74,7 @@ struct HistoryView: View {
         .task { await loadData() }
     }
 
+    @MainActor
     private func loadData() async {
         isLoading = true
         defer { isLoading = false }

@@ -4,11 +4,15 @@ import UserNotifications
 @main
 struct TaktApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra("Takt", systemImage: "clock") {
             if let vm = appDelegate.vm {
-                TaskListView(vm: vm)
+                TaskListView(vm: vm, openEditor: { params in
+                    appDelegate.editorParams = params
+                    openWindow(id: "editor")
+                })
             } else {
                 ProgressView("Starting...")
                     .frame(width: 280, height: 400)
@@ -16,20 +20,48 @@ struct TaktApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        // Editor window — uses id-only Window since Window(for:) has SDK compat issues.
+        // Params are stored on AppDelegate before calling openWindow(id:).
         Window("Editor", id: "editor") {
-            if let core = appDelegate.core {
-                TaskEditorView(
-                    vm: TaskEditorViewModel(
-                        core: core,
-                        taskId: appDelegate.editingTaskId,
-                        template: appDelegate.editingTemplate
-                    ),
+            if let core = appDelegate.core, let params = appDelegate.editorParams {
+                EditorWindowContent(
+                    core: core,
+                    params: params,
                     onSave: { Task { await appDelegate.vm?.refresh() } }
                 )
             }
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 480, height: 600)
+    }
+}
+
+/// C2 fix: Wraps TaskEditorView with a @State ViewModel that survives body re-evaluations.
+/// Without this, every App body re-render would recreate the ViewModel and lose form edits.
+struct EditorWindowContent: View {
+    let core: TaktCore
+    let params: EditorParams
+    let onSave: () -> Void
+
+    @State private var vm: TaskEditorViewModel?
+
+    var body: some View {
+        Group {
+            if let vm {
+                TaskEditorView(vm: vm, onSave: onSave)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            if vm == nil {
+                vm = TaskEditorViewModel(
+                    core: core,
+                    taskId: params.taskId,
+                    template: params.template
+                )
+            }
+        }
     }
 }
 
@@ -98,11 +130,13 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var vm: TaskListViewModel?
     var core: TaktCore?
-    var editingTaskId: String?
-    var editingTemplate: ActionTemplate?
+    var editorParams: EditorParams?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // I7: Kill previous instances
+        killPreviousInstances()
 
         // Request notification permission
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -121,6 +155,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 print("Failed to initialize Takt: \(error)")
             }
+        }
+    }
+
+    // I7: Single instance enforcement
+    private func killPreviousInstances() {
+        guard let bundleId = Bundle.main.bundleIdentifier else { return }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        for app in running where app.processIdentifier != myPID {
+            app.forceTerminate()
         }
     }
 }

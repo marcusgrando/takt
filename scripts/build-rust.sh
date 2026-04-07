@@ -7,15 +7,29 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="aarch64-apple-darwin"
-PROFILE="${1:-release}"
+
+# Support Xcode configuration: map Debug/Release to cargo profile
+if [ "${CONFIGURATION:-}" = "Debug" ]; then
+    PROFILE="debug"
+    CARGO_FLAG=""
+else
+    PROFILE="${1:-release}"
+    CARGO_FLAG="--$PROFILE"
+fi
+
 LIB="$REPO_ROOT/target/$TARGET/$PROFILE/liblibtakt.a"
 OUT="$REPO_ROOT/macos/Takt/Generated"
 
 mkdir -p "$OUT" "$OUT/Headers" "$OUT/Modules" "$OUT/LibTaktFFI"
 
 echo "==> Building libtakt ($PROFILE, $TARGET)..."
-cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
-    --package libtakt "--$PROFILE" --target "$TARGET"
+if [ -n "$CARGO_FLAG" ]; then
+    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
+        --package libtakt "$CARGO_FLAG" --target "$TARGET"
+else
+    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
+        --package libtakt --target "$TARGET"
+fi
 
 echo "==> Generating Swift sources..."
 cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
@@ -43,5 +57,4 @@ module LibTaktFFI {
 }
 MODULEMAP
 
-echo "==> Done. Output in $OUT"
-ls "$OUT"/ "$OUT/Headers"/ "$OUT/Modules"/
+echo "==> Done ($PROFILE). Output in $OUT"

@@ -2,7 +2,8 @@ import SwiftUI
 
 struct TaskItemView: View {
     let task: TaskDto
-    @Bindable var vm: TaskListViewModel
+    var vm: TaskListViewModel
+    var openEditor: (EditorParams) -> Void
     @Environment(\.openWindow) private var openWindow
 
     @State private var isRunning = false
@@ -64,7 +65,7 @@ struct TaskItemView: View {
                     .help("Run now")
 
                     Button {
-                        openWindow(value: EditorParams(taskId: task.id, template: nil))
+                        openEditor(EditorParams(taskId: task.id, template: nil))
                     } label: {
                         Image(systemName: "pencil")
                             .font(.system(size: 10))
