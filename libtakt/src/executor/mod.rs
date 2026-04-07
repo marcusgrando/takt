@@ -26,7 +26,23 @@ pub trait ActionExecutor: Send + Sync {
 }
 
 #[cfg(target_os = "macos")]
+pub mod macos;
+
+#[cfg(target_os = "macos")]
 pub mod keymap;
+
+#[cfg(target_os = "macos")]
+pub use macos::MacosExecutor;
+
+pub fn current_executor(
+    bridge: std::sync::Arc<dyn crate::platform::PlatformBridge>,
+) -> Box<dyn ActionExecutor> {
+    #[cfg(target_os = "macos")]
+    return Box::new(MacosExecutor::new(bridge));
+
+    #[cfg(not(target_os = "macos"))]
+    panic!("No executor available for this platform");
+}
 
 #[cfg(test)]
 mod tests;
