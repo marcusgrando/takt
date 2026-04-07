@@ -266,8 +266,32 @@ Kept:
 - Unsaved changes confirmation on dismiss
 
 **MacOSPlatformBridge** — Implements UniFFI foreign trait (`with_foreign`):
-- `sendNotification()` → `UNUserNotificationCenter`
-- `runOnMainSync(callbackId:)` → `DispatchQueue.main.async` + callback registry (MUST be `.async`, not `.sync`, to prevent deadlock when Rust caller is on main thread; Rust awaits completion via `tokio::sync::oneshot` channel)
+
+The generated Swift protocol for `PlatformBridge` requires `Sendable` conformance (maps from Rust's `Send + Sync` bound). Since `UNUserNotificationCenter` is not `Sendable`, the implementation must be a `final class` with `@unchecked Sendable`:
+
+```swift
+final class MacOSPlatformBridge: PlatformBridgeProtocol, @unchecked Sendable {
+    func sendNotification(title: String, body: String, sound: Bool) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        if sound { content.sound = .default }
+        let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+
+    func runOnMainSync(callbackId: UInt64) {
+        DispatchQueue.main.async {
+            TaktCallbackRegistry.execute(id: callbackId)
+        }
+    }
+}
+```
+
+`@unchecked Sendable` is safe here because:
+- `sendNotification` uses only `UNUserNotificationCenter.current()` (thread-safe singleton)
+- `runOnMainSync` uses only `DispatchQueue.main.async` (thread-safe)
+- The class holds no mutable state
 
 ### NSWorkspace Lookups (moved from Rust to Swift)
 
@@ -413,7 +437,7 @@ Validation: `cargo build --release` produces `liblibtakt.a`, `cargo test` passes
 Configure UniFFI, generate Swift bindings, create minimal Xcode project.
 
 Deliverables:
-1. `uniffi.toml` configured (module_name, ffi_module_name, generate_module_map, generate_codable_conformance for Swift Codable support on DTOs)
+1. `uniffi.toml` configured (module_name, ffi_module_name, generate_codable_conformance for Swift Codable support on DTOs). Note: `generate_module_map` is NOT used — the modulemap is controlled by `uniffi-bindgen-swift --modulemap` CLI flag, which ignores the toml setting.
 2. `scripts/build-rust.sh` functional — uses `uniffi-bindgen-swift` in library mode with 3 separate invocations (swift-sources, headers, modulemap)
 3. Xcode project `macos/Takt.xcodeproj`
 4. Build phase linking `liblibtakt.a`
