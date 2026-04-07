@@ -131,6 +131,12 @@ Note: UniFFI foreign traits don't support generic closures across FFI. Main thre
 ### TaktCore (UniFFI exported object)
 
 ```rust
+// Required for proc-macro crates — enables UniFFI metadata extraction
+// in library mode. Must be at crate root, never combined with
+// include_scaffolding!().
+// See: https://mozilla.github.io/uniffi-rs/latest/proc_macro/index.html
+uniffi::setup_scaffolding!();
+
 #[derive(uniffi::Object)]
 pub struct TaktCore {
     bridge: Arc<dyn PlatformBridge>,
@@ -196,7 +202,7 @@ impl TaktCore {
 |--------|--------|---------|
 | `models.rs` | Add derives | `#[derive(uniffi::Record)]` on structs, `#[derive(uniffi::Enum)]` on enums. Serde derives kept for DB JSON serialization. |
 | `store.rs` | None | Pure SQLx, no Tauri dependency. |
-| `db.rs` | None | Pure SQLx + dirs crate. Same DB path `~/Library/Application Support/takt/`. |
+| `db.rs` | None (code unchanged) | Pure SQLx + dirs crate. Same DB path `~/Library/Application Support/takt/`. **Note:** debug mode deletes and recreates `takt-dev.db` on every launch (line 10); release mode uses `takt.db` which is never deleted (line 34). This behavior carries over as-is — the "existing user DB must keep working" guarantee applies only to release builds. |
 | `launch_agent.rs` | None | Uses `std::process::Command`. |
 | `executor/mod.rs` | Small | `current_executor(app_handle)` → `current_executor(bridge: Arc<dyn PlatformBridge>)` |
 | `executor/macos.rs` | **High** | Contract change, not just API swap. The current `run_on_main()` helper (lines 25-41) is synchronous via `mpsc::sync_channel`. With async bridge dispatch, this becomes `async fn run_on_main()` using `tokio::sync::oneshot` for completion. All call sites (`open_file`, `open_url`, `open_app`, `Settings`) must propagate the async change. Additionally: `app.notification()` → `bridge.send_notification()`, `MacosExecutor { app_handle }` → `MacosExecutor { bridge }`. |
@@ -391,7 +397,7 @@ Extract Rust code from `src-tauri/src/` to `libtakt/src/`, remove all Tauri depe
 Deliverables:
 1. New crate `libtakt/` with workspace config
 2. `platform.rs` — `PlatformBridge` trait with `#[uniffi::export(with_foreign)]`
-3. `lib.rs` — `TaktCore` struct with sync `new()` + async `start()` + all UniFFI exports
+3. `lib.rs` — `uniffi::setup_scaffolding!()` at crate root + `TaktCore` struct with sync `new()` + async `start()` + all UniFFI exports
 3b. `src/bin/uniffi-bindgen-swift.rs` — bindgen binary entry point
 4. `executor/macos.rs` refactored (AppHandle → PlatformBridge)
 5. `scheduler.rs` refactored (AppHandle → PlatformBridge)
