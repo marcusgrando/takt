@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub fn launch_agent_path() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join("Library/LaunchAgents/com.marcusgrando.takt.plist"))
+    Some(dirs::home_dir()?.join("Library/LaunchAgents/app.takt.plist"))
 }
 
 fn xml_escape(s: &str) -> String {
@@ -26,7 +26,7 @@ pub fn plist_content(app_path: &Path) -> String {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.marcusgrando.takt</string>
+    <string>app.takt</string>
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>

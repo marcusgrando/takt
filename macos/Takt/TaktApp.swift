@@ -16,19 +16,18 @@ struct TaktApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("Editor", id: "editor", for: EditorParams.self) { $params in
-            if let params {
+        Window("Editor", id: "editor") {
+            if let core = appDelegate.core {
                 TaskEditorView(
                     vm: TaskEditorViewModel(
-                        core: appDelegate.core!,
-                        taskId: params.taskId,
-                        template: params.template
+                        core: core,
+                        taskId: appDelegate.editingTaskId,
+                        template: appDelegate.editingTemplate
                     ),
                     onSave: { Task { await appDelegate.vm?.refresh() } }
                 )
             }
         }
-        .windowStyle(.titleBar)
         .windowResizability(.contentSize)
         .defaultSize(width: 480, height: 600)
     }
@@ -99,6 +98,8 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var vm: TaskListViewModel?
     var core: TaktCore?
+    var editingTaskId: String?
+    var editingTemplate: ActionTemplate?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)

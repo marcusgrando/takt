@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ActionBuilderView: View {
     @Binding var action: Action
