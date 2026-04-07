@@ -30,8 +30,13 @@ mkdir -p "$OUT" "$OUT/Headers" "$OUT/Modules" "$OUT/LibTaktFFI"
 echo "==> Building libtakt ($PROFILE, $TARGET)..."
 cargo build "${CARGO_ARGS[@]}"
 
-# 2. Regenerate bindings only if the static lib is newer than our stamp file
-if [ "$LIB" -nt "$STAMP" ] 2>/dev/null; then
+# Also build the bindgen binary (cargo caches this too)
+BINDGEN="$REPO_ROOT/target/debug/uniffi-bindgen-swift"
+cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --package libtakt --bin uniffi-bindgen-swift
+
+# 2. Regenerate bindings if lib OR bindgen binary is newer than stamp
+if [ "$LIB" -nt "$STAMP" ] || [ "$BINDGEN" -nt "$STAMP" ] 2>/dev/null; then
     echo "==> Generating Swift bindings..."
     cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
         --package libtakt --bin uniffi-bindgen-swift -- \
