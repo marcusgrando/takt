@@ -1,5 +1,9 @@
 #!/bin/bash
 # scripts/build-rust.sh — Build libtakt and generate Swift bindings
+#
+# Runs on every Xcode build (alwaysOutOfDate=1) but is fast when nothing
+# changed: cargo build is a no-op (~0.5s), and bindgen is skipped if the
+# .a file hasn't been modified since the last generation.
 set -euo pipefail
 
 # Xcode doesn't inherit shell PATH — add cargo explicitly
@@ -13,51 +17,45 @@ PROFILE="${1:-release}"
 [ "${CONFIGURATION:-}" = "Debug" ] && PROFILE="debug"
 
 # cargo uses --release flag; debug is the default (no flag)
-if [ "$PROFILE" = "release" ]; then
-    CARGO_FLAG="--release"
-else
-    CARGO_FLAG=""
-    PROFILE="debug"
-fi
+CARGO_ARGS=(--manifest-path "$REPO_ROOT/Cargo.toml" --package libtakt --target "$TARGET")
+[ "$PROFILE" = "release" ] && CARGO_ARGS+=(--release)
 
 LIB="$REPO_ROOT/target/$TARGET/$PROFILE/liblibtakt.a"
 OUT="$REPO_ROOT/macos/Takt/Generated"
+STAMP="$OUT/.bindgen-stamp"
 
 mkdir -p "$OUT" "$OUT/Headers" "$OUT/Modules" "$OUT/LibTaktFFI"
 
+# 1. Build — cargo's own incremental check makes this ~0.5s when nothing changed
 echo "==> Building libtakt ($PROFILE, $TARGET)..."
-if [ -n "$CARGO_FLAG" ]; then
-    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
-        --package libtakt "$CARGO_FLAG" --target "$TARGET"
-else
-    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" \
-        --package libtakt --target "$TARGET"
-fi
+cargo build "${CARGO_ARGS[@]}"
 
-echo "==> Generating Swift sources..."
-cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
-    --package libtakt --bin uniffi-bindgen-swift -- \
-    "$LIB" "$OUT" --swift-sources
+# 2. Regenerate bindings only if the static lib is newer than our stamp file
+if [ "$LIB" -nt "$STAMP" ] 2>/dev/null; then
+    echo "==> Generating Swift bindings..."
+    cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
+        --package libtakt --bin uniffi-bindgen-swift -- \
+        "$LIB" "$OUT" --swift-sources
 
-echo "==> Generating C headers..."
-cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
-    --package libtakt --bin uniffi-bindgen-swift -- \
-    "$LIB" "$OUT/Headers" --headers
+    cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
+        --package libtakt --bin uniffi-bindgen-swift -- \
+        "$LIB" "$OUT/Headers" --headers
 
-echo "==> Generating modulemap..."
-cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
-    --package libtakt --bin uniffi-bindgen-swift -- \
-    "$LIB" "$OUT/Modules" --modulemap --modulemap-filename LibTaktFFI.modulemap
+    cargo run --manifest-path "$REPO_ROOT/Cargo.toml" \
+        --package libtakt --bin uniffi-bindgen-swift -- \
+        "$LIB" "$OUT/Modules" --modulemap --modulemap-filename LibTaktFFI.modulemap
 
-# Fix: Create a proper Clang module directory at Generated/LibTaktFFI/
-# with module.modulemap + header. Clang discovers modules by scanning
-# SWIFT_INCLUDE_PATHS for subdirectories containing module.modulemap.
-cp "$OUT/Headers/LibTaktFFI.h" "$OUT/LibTaktFFI/LibTaktFFI.h"
-cat > "$OUT/LibTaktFFI/module.modulemap" << 'MODULEMAP'
+    # Clang module directory with module.modulemap + header
+    cp "$OUT/Headers/LibTaktFFI.h" "$OUT/LibTaktFFI/LibTaktFFI.h"
+    cat > "$OUT/LibTaktFFI/module.modulemap" << 'MODULEMAP'
 module LibTaktFFI {
     header "LibTaktFFI.h"
     export *
 }
 MODULEMAP
 
-echo "==> Done ($PROFILE). Output in $OUT"
+    touch "$STAMP"
+    echo "==> Bindings regenerated."
+else
+    echo "==> Bindings up to date, skipping."
+fi

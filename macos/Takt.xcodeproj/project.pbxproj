@@ -119,20 +119,14 @@
 /* Begin PBXShellScriptBuildPhase section */
 		AABB00112F85400000000001 /* Build Rust (libtakt) */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/../libtakt/src/",
-				"$(SRCROOT)/../libtakt/Cargo.toml",
-				"$(SRCROOT)/../libtakt/migrations/",
-				"$(SRCROOT)/../Cargo.toml",
-				"$(SRCROOT)/../Cargo.lock",
 			);
 			name = "Build Rust (libtakt)";
 			outputPaths = (
-				"$(SRCROOT)/Takt/Generated/LibTakt.swift",
-				"$(SRCROOT)/Takt/Generated/LibTaktFFI/LibTaktFFI.h",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
