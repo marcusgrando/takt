@@ -37,6 +37,15 @@ fn db_path() -> anyhow::Result<PathBuf> {
 }
 
 #[cfg(test)]
+pub async fn connect_in_memory() -> anyhow::Result<SqlitePool> {
+    let pool = SqlitePoolOptions::new()
+        .connect("sqlite::memory:")
+        .await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
+    Ok(pool)
+}
+
+#[cfg(test)]
 mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
