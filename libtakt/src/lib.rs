@@ -23,7 +23,7 @@ use store::TaskStore;
 struct InitializedState {
     store: Arc<TaskStore>,
     scheduler: Arc<AppScheduler>,
-    executor: Arc<Box<dyn ActionExecutor>>,
+    executor: Arc<dyn ActionExecutor>,
 }
 
 #[derive(uniffi::Object)]
@@ -46,7 +46,7 @@ impl TaktCore {
         Ok(&self.state()?.scheduler)
     }
 
-    fn executor_ref(&self) -> Result<&Arc<Box<dyn ActionExecutor>>, TaktError> {
+    fn executor_ref(&self) -> Result<&Arc<dyn ActionExecutor>, TaktError> {
         Ok(&self.state()?.executor)
     }
 }
@@ -67,7 +67,7 @@ impl TaktCore {
             .get_or_try_init(|| async {
                 let pool = db::connect().await?;
                 let store = Arc::new(TaskStore::new(pool));
-                let executor = Arc::new(current_executor(bridge.clone()));
+                let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
                     AppScheduler::new(
                         Arc::clone(&store),
@@ -237,7 +237,7 @@ impl TaktCore {
         let task = store.get_task(&id).await?
             .ok_or_else(|| TaktError::NotFound { msg: "Task not found".to_string() })?;
         scheduler::execute_and_log(
-            &***executor, store, &*self.bridge,
+            &**executor, store, &*self.bridge,
             &id, &task.name, task.notify_on_run, &task.action,
         )
         .await
@@ -267,7 +267,7 @@ impl TaktCore {
         self.state
             .get_or_try_init(|| async {
                 let store = Arc::new(TaskStore::new(pool));
-                let executor = Arc::new(current_executor(bridge.clone()));
+                let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
                     AppScheduler::new(Arc::clone(&store), Arc::clone(&executor), Arc::clone(&bridge))
                         .await

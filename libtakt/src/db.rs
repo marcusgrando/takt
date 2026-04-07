@@ -21,6 +21,10 @@ pub async fn connect() -> anyhow::Result<SqlitePool> {
         .connect(&db_url)
         .await?;
 
+    sqlx::query("PRAGMA foreign_keys = ON;")
+        .execute(&pool)
+        .await?;
+
     sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)
 }
@@ -40,6 +44,9 @@ fn db_path() -> anyhow::Result<PathBuf> {
 pub async fn connect_in_memory() -> anyhow::Result<SqlitePool> {
     let pool = SqlitePoolOptions::new()
         .connect("sqlite::memory:")
+        .await?;
+    sqlx::query("PRAGMA foreign_keys = ON;")
+        .execute(&pool)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)

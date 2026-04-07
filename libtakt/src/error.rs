@@ -16,6 +16,11 @@ pub enum TaktError {
 
 impl From<anyhow::Error> for TaktError {
     fn from(e: anyhow::Error) -> Self {
-        TaktError::Database { msg: e.to_string() }
+        let msg = e.to_string();
+        if msg.contains("scheduler") || msg.contains("cron") || msg.contains("job") {
+            TaktError::Scheduler { msg }
+        } else {
+            TaktError::Database { msg }
+        }
     }
 }

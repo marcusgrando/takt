@@ -25,7 +25,7 @@ type BoxedCallback = Box<dyn FnOnce() + Send + 'static>;
 static REGISTRY: Mutex<Option<HashMap<u64, BoxedCallback>>> = Mutex::new(None);
 
 fn registry() -> std::sync::MutexGuard<'static, Option<HashMap<u64, BoxedCallback>>> {
-    let mut guard = REGISTRY.lock().unwrap();
+    let mut guard = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(HashMap::new());
     }

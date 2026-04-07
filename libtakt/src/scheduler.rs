@@ -47,7 +47,7 @@ fn missed_cron_run(expression: &str, last_run_at: Option<&str>) -> bool {
 
 pub struct AppScheduler {
     inner: JobScheduler,
-    executor: Arc<Box<dyn ActionExecutor>>,
+    executor: Arc<dyn ActionExecutor>,
     store: Arc<TaskStore>,
     bridge: Arc<dyn PlatformBridge>,
     job_ids: Mutex<HashMap<String, Uuid>>,
@@ -58,7 +58,7 @@ pub struct AppScheduler {
 impl AppScheduler {
     pub async fn new(
         store: Arc<TaskStore>,
-        executor: Arc<Box<dyn ActionExecutor>>,
+        executor: Arc<dyn ActionExecutor>,
         bridge: Arc<dyn PlatformBridge>,
     ) -> anyhow::Result<Self> {
         let inner = JobScheduler::new().await?;
@@ -147,7 +147,7 @@ impl AppScheduler {
                 let action = task.action.clone();
                 tokio::spawn(async move {
                     let _ = execute_and_log(
-                        &**executor,
+                        &*executor,
                         &store,
                         &*bridge,
                         &task_id,
@@ -195,7 +195,7 @@ impl AppScheduler {
                             _ => return,
                         }
                         let _ = execute_and_log(
-                            &**executor,
+                            &*executor,
                             &store,
                             &*bridge,
                             &task_id,
@@ -241,7 +241,7 @@ impl AppScheduler {
                             }
                         }
                         let _ = execute_and_log(
-                            &**executor,
+                            &*executor,
                             &store,
                             &*bridge,
                             &task_id,
@@ -304,7 +304,7 @@ impl AppScheduler {
 async fn daily_first_use_loop(
     cancel: CancellationToken,
     required_secs: u64,
-    executor: Arc<Box<dyn ActionExecutor>>,
+    executor: Arc<dyn ActionExecutor>,
     store: Arc<TaskStore>,
     bridge: Arc<dyn PlatformBridge>,
     task_id: String,
@@ -364,7 +364,7 @@ async fn daily_first_use_loop(
                     _ => return, // deleted
                 }
                 let _ = execute_and_log(
-                    &**executor,
+                    &*executor,
                     &store,
                     &*bridge,
                     &task_id,

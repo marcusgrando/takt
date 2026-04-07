@@ -1,4 +1,5 @@
 use crate::models::Action;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionResult {
@@ -14,6 +15,7 @@ pub enum ExecutorError {
     Io(#[from] std::io::Error),
     #[error("HTTP error: {0}")]
     Http(String),
+    #[allow(dead_code)]
     #[error("Unsupported action on this platform: {0}")]
     Unsupported(String),
     #[error("Accessibility permission required: {0}")]
@@ -36,9 +38,9 @@ pub use macos::MacosExecutor;
 
 pub fn current_executor(
     bridge: std::sync::Arc<dyn crate::platform::PlatformBridge>,
-) -> Box<dyn ActionExecutor> {
+) -> Arc<dyn ActionExecutor> {
     #[cfg(target_os = "macos")]
-    return Box::new(MacosExecutor::new(bridge));
+    return Arc::new(MacosExecutor::new(bridge));
 
     #[cfg(not(target_os = "macos"))]
     panic!("No executor available for this platform");
