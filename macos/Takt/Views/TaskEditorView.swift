@@ -302,13 +302,18 @@ struct WindowCloseInterceptor: NSViewRepresentable {
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
             if forceClose {
+                DispatchQueue.main.async { (NSApp.delegate as? AppDelegate)?.hideFromDock() }
                 return true
             }
             if isDirty {
                 onAttemptClose()
                 return false
             }
-            return originalDelegate?.windowShouldClose?(sender) ?? true
+            let allowed = originalDelegate?.windowShouldClose?(sender) ?? true
+            if allowed {
+                DispatchQueue.main.async { (NSApp.delegate as? AppDelegate)?.hideFromDock() }
+            }
+            return allowed
         }
 
         // Forward all lifecycle events to the original SwiftUI delegate

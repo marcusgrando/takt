@@ -56,7 +56,7 @@ struct TaskListView: View {
                 } label: {
                     Label("Quit", systemImage: "power")
                         .font(.system(size: 12))
-                        .foregroundStyle(.primary.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.8))
                 }
                 .buttonStyle(.borderless)
                 Spacer()
@@ -65,7 +65,7 @@ struct TaskListView: View {
                 } label: {
                     Label("History", systemImage: "clock")
                         .font(.system(size: 12))
-                        .foregroundStyle(.primary.opacity(0.6))
+                        .foregroundStyle(.primary.opacity(0.8))
                 }
                 .buttonStyle(.borderless)
             }

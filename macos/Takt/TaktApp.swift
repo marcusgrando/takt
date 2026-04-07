@@ -11,7 +11,9 @@ struct TaktApp: App {
             if let vm = appDelegate.vm {
                 TaskListView(vm: vm, openEditor: { params in
                     appDelegate.editorParams = params
+                    appDelegate.captureAppToReactivate()
                     appDelegate.dismissPopover()
+                    NSApp.setActivationPolicy(.regular)
                     openWindow(id: "editor")
                     NSApp.activate(ignoringOtherApps: true)
                 })
@@ -73,6 +75,7 @@ struct EditorWindowContent: View {
 struct EditorParams: Codable, Hashable {
     var taskId: String?
     var template: ActionTemplate?
+    var openId: UUID = UUID()
 }
 
 enum ActionTemplate: String, Codable, Hashable, CaseIterable {
@@ -136,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var vm: TaskListViewModel?
     var core: TaktCore?
     var editorParams: EditorParams?
+    private var appToReactivate: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -173,6 +177,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.performClick(nil)
             return
         }
+    }
+
+    /// Captures the app that was frontmost before the editor activates Takt.
+    func captureAppToReactivate() {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            appToReactivate = nil
+            return
+        }
+
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        appToReactivate = frontApp.processIdentifier == currentPID ? nil : frontApp
+    }
+
+    /// Hides the app from Dock and Cmd+Tab switcher.
+    /// Called explicitly when the editor window is about to close.
+    func hideFromDock() {
+        NSApp.setActivationPolicy(.accessory)
+        if let appToReactivate {
+            appToReactivate.activate()
+        }
+        appToReactivate = nil
     }
 
     // I7: Single instance enforcement

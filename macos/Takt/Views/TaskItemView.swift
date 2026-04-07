@@ -23,7 +23,7 @@ struct TaskItemView: View {
             // Row 2: status + badge + toggle + actions
             HStack(spacing: 8) {
                 Circle()
-                    .fill(task.enabled ? Color.green : Color.secondary.opacity(0.25))
+                    .fill(task.enabled ? Color.green : Color.secondary.opacity(0.45))
                     .frame(width: 6, height: 6)
 
                 Text(actionLabel)
@@ -58,7 +58,7 @@ struct TaskItemView: View {
                         } else {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.primary.opacity(0.8))
                         }
                     }
                     .buttonStyle(.borderless)
@@ -70,7 +70,7 @@ struct TaskItemView: View {
                     } label: {
                         Image(systemName: "slider.horizontal.3")
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary.opacity(0.8))
                     }
                     .buttonStyle(.borderless)
                     .help("Edit")
@@ -85,7 +85,7 @@ struct TaskItemView: View {
                         } else {
                             Image(systemName: "trash")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.red.opacity(0.7))
+                                .foregroundStyle(.red.opacity(0.8))
                         }
                     }
                     .buttonStyle(.borderless)
