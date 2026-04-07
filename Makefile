@@ -1,16 +1,9 @@
 # Takt Makefile
-# Tauri 2 + React + Rust — macOS menu bar app
+# SwiftUI + Rust (libtakt via UniFFI) — macOS menu bar app
 
-APP_NAME     := takt
-VERSION      := 0.1.0
-BUNDLE_DIR   := src-tauri/target/release/bundle
-APP_PATH     := $(BUNDLE_DIR)/macos/$(APP_NAME).app
-DMG_PATH     := $(BUNDLE_DIR)/dmg/$(APP_NAME)_$(VERSION)_aarch64.dmg
-TAURI_DIR    := src-tauri
+APP_NAME := Takt
 
 .DEFAULT_GOAL := help
-
-# ─── Help ──────────────────────────────────────────────────────────────────────
 
 .PHONY: help
 help: ## Show this help message
@@ -18,94 +11,52 @@ help: ## Show this help message
 	  /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 
-# ─── Development ───────────────────────────────────────────────────────────────
-
-.PHONY: dev
-dev: ## Start Tauri dev mode (hot reload)
-	bunx tauri dev
-
-.PHONY: frontend
-frontend: ## Start Vite frontend dev server only
-	bun run dev
-
-# ─── Build ─────────────────────────────────────────────────────────────────────
-
-.PHONY: build
-build: ## Build frontend (TypeScript + Vite)
-	bun run build
-
-.PHONY: app
-app: ## Build release .app bundle only
-	bunx tauri build --bundles app
-	@echo ""
-	@echo "  App bundle: $(APP_PATH)"
-
-.PHONY: app-debug
-app-debug: ## Build app in debug mode (faster, no optimizations)
-	bunx tauri build --debug --bundles app
-	@echo ""
-	@echo "  Debug app: src-tauri/target/debug/bundle/macos/$(APP_NAME).app"
-
-.PHONY: dmg
-dmg: ## Build signed release DMG (requires Developer ID certificate)
-	bunx tauri build --bundles dmg
-	@echo ""
-	@echo "  DMG: $(DMG_PATH)"
-
-# ─── Testing ───────────────────────────────────────────────────────────────────
+# ─── Development ───────────────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run all Rust unit tests
-	cargo test --manifest-path $(TAURI_DIR)/Cargo.toml
+test: ## Run Rust unit tests
+	cargo test --package libtakt
 
-.PHONY: test-verbose
-test-verbose: ## Run Rust tests with output
-	cargo test --manifest-path $(TAURI_DIR)/Cargo.toml -- --nocapture
+.PHONY: build-rust
+build-rust: ## Build Rust static lib + generate Swift bindings
+	./scripts/build-rust.sh release
 
-.PHONY: typecheck
-typecheck: ## Run TypeScript type-check only (no emit)
-	bunx tsc --noEmit
+.PHONY: build
+build: ## Build the app via Xcode (Release)
+	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Release build
 
-# ─── Code Quality ──────────────────────────────────────────────────────────────
+.PHONY: build-debug
+build-debug: ## Build the app via Xcode (Debug)
+	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug build
+
+# ─── Code Quality ──────────────────────────────────────────────────────────
 
 .PHONY: lint
 lint: ## Run Rust clippy linter
-	cargo clippy --manifest-path $(TAURI_DIR)/Cargo.toml -- -D warnings
+	cargo clippy --package libtakt -- -D warnings
 
 .PHONY: fmt
 fmt: ## Format Rust code
-	cargo fmt --manifest-path $(TAURI_DIR)/Cargo.toml
+	cargo fmt --package libtakt
 
 .PHONY: fmt-check
-fmt-check: ## Check Rust formatting without modifying files
-	cargo fmt --manifest-path $(TAURI_DIR)/Cargo.toml -- --check
-
-# ─── CI / Full Verification ────────────────────────────────────────────────────
+fmt-check: ## Check Rust formatting
+	cargo fmt --package libtakt -- --check
 
 .PHONY: check
-check: fmt-check lint typecheck test ## Run all checks (format, lint, typecheck, tests)
+check: fmt-check lint test ## Run all checks (format, lint, tests)
 	@echo ""
 	@echo "  All checks passed."
 
-# ─── Clean ─────────────────────────────────────────────────────────────────────
+# ─── Clean ─────────────────────────────────────────────────────────────────
 
 .PHONY: clean
-clean: ## Remove frontend build artifacts
-	rm -rf dist
+clean: ## Remove Rust build artifacts
+	cargo clean
 
-.PHONY: clean-rust
-clean-rust: ## Remove Rust build artifacts
-	cargo clean --manifest-path $(TAURI_DIR)/Cargo.toml
+.PHONY: clean-xcode
+clean-xcode: ## Clean Xcode derived data
+	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt clean
 
 .PHONY: clean-all
-clean-all: clean clean-rust ## Remove all build artifacts (frontend + Rust)
-
-# ─── Install ───────────────────────────────────────────────────────────────────
-
-.PHONY: install
-install: ## Install frontend dependencies
-	bun install
-
-.PHONY: open
-open: ## Open the built .app bundle
-	open $(APP_PATH)
+clean-all: clean clean-xcode ## Remove all build artifacts

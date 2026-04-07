@@ -22,6 +22,8 @@ struct TaktApp: App {
 
         // Editor window — uses id-only Window since Window(for:) has SDK compat issues.
         // Params are stored on AppDelegate before calling openWindow(id:).
+        // .id(editorParams) forces SwiftUI to destroy and recreate EditorWindowContent
+        // when params change, ensuring a fresh ViewModel for each edit/new task.
         Window("Editor", id: "editor") {
             if let core = appDelegate.core, let params = appDelegate.editorParams {
                 EditorWindowContent(
@@ -29,6 +31,7 @@ struct TaktApp: App {
                     params: params,
                     onSave: { Task { await appDelegate.vm?.refresh() } }
                 )
+                .id(params)
             }
         }
         .windowResizability(.contentSize)

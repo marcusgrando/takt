@@ -190,6 +190,12 @@ struct TaskEditorView: View {
             }
         }
         .frame(minWidth: 460, minHeight: 500)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") { handleClose() }
+                    .keyboardShortcut("w", modifiers: .command)
+            }
+        }
         .confirmationDialog(
             "You have unsaved changes. Close without saving?",
             isPresented: $showDiscardAlert,
@@ -199,6 +205,14 @@ struct TaskEditorView: View {
                 dismiss()
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func handleClose() {
+        if vm.isDirty {
+            showDiscardAlert = true
+        } else {
+            dismiss()
         }
     }
 
