@@ -137,13 +137,21 @@ Note: UniFFI foreign traits don't support generic closures across FFI. Main thre
 // See: https://mozilla.github.io/uniffi-rs/latest/proc_macro/index.html
 uniffi::setup_scaffolding!();
 
+/// All initialized resources bundled as a single unit.
+struct InitializedState {
+    store: Arc<TaskStore>,
+    scheduler: Arc<AppScheduler>,
+    executor: Arc<Box<dyn ActionExecutor>>,
+}
+
 #[derive(uniffi::Object)]
 pub struct TaktCore {
     bridge: Arc<dyn PlatformBridge>,
-    // Populated by start(). Using OnceLock for safe one-time init.
-    store: OnceLock<Arc<TaskStore>>,
-    scheduler: OnceLock<Arc<AppScheduler>>,
-    executor: OnceLock<Arc<Box<dyn ActionExecutor>>>,
+    // Single atomic init gate. tokio::sync::OnceCell ensures:
+    // - First call runs init; if it fails, next call retries.
+    // - If it succeeds, all subsequent calls return cached value.
+    // - No partial state: either all resources exist or none do.
+    state: tokio::sync::OnceCell<InitializedState>,
 }
 
 #[uniffi::export]
