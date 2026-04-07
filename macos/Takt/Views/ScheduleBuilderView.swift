@@ -16,7 +16,7 @@ struct ScheduleBuilderView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
             // Schedule type tabs
             Picker("Type", selection: Binding(
                 get: { scheduleType },
@@ -61,7 +61,7 @@ struct ScheduleBuilderView: View {
 
     @ViewBuilder
     private var cronContent: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
             // Frequency selector
             HStack {
                 Text("Frequency")

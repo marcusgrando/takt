@@ -3,34 +3,10 @@ import SwiftUI
 struct TaskEditorView: View {
     @Bindable var vm: TaskEditorViewModel
     var onSave: () -> Void
-    @Environment(\.dismiss) private var dismiss
     @State private var showDiscardAlert = false
 
     var body: some View {
         VStack(spacing: 0) {
-            // Title bar
-            HStack {
-                Text(vm.isEdit ? "Edit Task" : "New Task")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Button {
-                    Task { await handleSave() }
-                } label: {
-                    if vm.saving {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Text(vm.isEdit ? "Save" : "Create")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(vm.saving)
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 56)
-            Divider()
-
             // Scrollable form
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -187,17 +163,34 @@ struct TaskEditorView: View {
                 }
                 .padding(20)
                 .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(minWidth: 460, minHeight: 500)
+        .frame(minWidth: 500, idealWidth: 500, minHeight: 600)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Close") { handleClose() }
-                    .keyboardShortcut("w", modifiers: .command)
+                Button { handleClose() } label: {
+                    Image(systemName: "xmark")
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button {
+                    Task { await handleSave() }
+                } label: {
+                    if vm.saving {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Save")
+                    }
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(vm.saving)
             }
         }
         // Intercept native window close (red X button) via NSWindow delegate
-        .background(WindowCloseInterceptor(isDirty: vm.isDirty, onAttemptClose: {
+        .background(WindowCloseInterceptor(isDirty: vm.isDirty, forceClose: $forceClose, onAttemptClose: {
             showDiscardAlert = true
         }))
         .confirmationDialog(
@@ -206,17 +199,30 @@ struct TaskEditorView: View {
             titleVisibility: .visible
         ) {
             Button("Discard Changes", role: .destructive) {
-                dismiss()
+                forceCloseWindow()
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    @State private var forceClose = false
+
+    private func forceCloseWindow() {
+        forceClose = true
+        DispatchQueue.main.async {
+            NSApp.keyWindow?.close()
+        }
+    }
+
+    private func closeWindow() {
+        NSApp.keyWindow?.close()
     }
 
     private func handleClose() {
         if vm.isDirty {
             showDiscardAlert = true
         } else {
-            dismiss()
+            closeWindow()
         }
     }
 
@@ -224,7 +230,7 @@ struct TaskEditorView: View {
         let success = await vm.save()
         if success {
             onSave()
-            dismiss()
+            closeWindow()
         }
     }
 
@@ -232,7 +238,7 @@ struct TaskEditorView: View {
         let success = await vm.deleteCurrentTask()
         if success {
             onSave()
-            dismiss()
+            closeWindow()
         }
     }
 }
@@ -243,6 +249,7 @@ struct TaskEditorView: View {
 /// delegate when the view is removed to avoid lifecycle regressions.
 struct WindowCloseInterceptor: NSViewRepresentable {
     let isDirty: Bool
+    @Binding var forceClose: Bool
     let onAttemptClose: () -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -255,6 +262,7 @@ struct WindowCloseInterceptor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.isDirty = isDirty
+        context.coordinator.forceClose = forceClose
         context.coordinator.onAttemptClose = onAttemptClose
     }
 
@@ -266,6 +274,7 @@ struct WindowCloseInterceptor: NSViewRepresentable {
 
     class Coordinator: NSObject, NSWindowDelegate {
         var isDirty = false
+        var forceClose = false
         var onAttemptClose: () -> Void = {}
         private weak var window: NSWindow?
         // Strong ref: NSWindow.delegate is unowned/unretained in AppKit,
@@ -292,11 +301,13 @@ struct WindowCloseInterceptor: NSViewRepresentable {
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if forceClose {
+                return true
+            }
             if isDirty {
                 onAttemptClose()
                 return false
             }
-            // Consult original delegate too (in case SwiftUI has its own gate)
             return originalDelegate?.windowShouldClose?(sender) ?? true
         }
 

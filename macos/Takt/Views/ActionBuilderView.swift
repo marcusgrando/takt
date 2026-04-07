@@ -23,7 +23,7 @@ struct ActionBuilderView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
             // Type selector
             Picker("Type", selection: Binding(
                 get: { actionType },
@@ -486,45 +486,33 @@ struct ActionBuilderView: View {
                     .foregroundStyle(.secondary)
 
                 ForEach(Array(shortcuts.enumerated()), id: \.offset) { index, combo in
-                    HStack(spacing: 6) {
-                        ForEach([Modifier.cmd, .shift, .opt, .ctrl], id: \.self) { mod in
-                            Button(modLabel(mod)) {
-                                toggleModifier(at: index, mod: mod)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(combo.modifiers.contains(mod) ? .accentColor : nil)
-                            .controlSize(.small)
-                            .font(.system(size: 10))
-                        }
-
-                        TextField("key", text: Binding(
-                            get: { combo.key },
-                            set: { updateShortcutKey(at: index, key: $0) }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 60)
-                        .font(.system(size: 12, design: .monospaced))
+                    HStack(spacing: 8) {
+                        ShortcutRecorderView(
+                            combo: Binding(
+                                get: { shortcuts[index] },
+                                set: { updateShortcut(at: index, combo: $0) }
+                            ),
+                            onChanged: {}
+                        )
+                        .frame(width: 160, height: 22)
 
                         Button {
                             removeShortcut(at: index)
                         } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10))
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
+                        .help("Remove shortcut")
                     }
                 }
 
-                Button {
+                Button("+ Add shortcut") {
                     addShortcut()
-                } label: {
-                    Label("Add shortcut", systemImage: "plus")
-                        .font(.system(size: 12))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
+                .font(.system(size: 13))
+                .buttonStyle(.borderless)
 
                 // Delay
                 HStack(spacing: 4) {
@@ -559,21 +547,9 @@ struct ActionBuilderView: View {
         updateShortcuts(s)
     }
 
-    private func toggleModifier(at index: Int, mod: Modifier) {
+    private func updateShortcut(at index: Int, combo: KeyCombo) {
         var s = currentShortcuts
-        var combo = s[index]
-        if combo.modifiers.contains(mod) {
-            combo.modifiers.removeAll { $0 == mod }
-        } else {
-            combo.modifiers.append(mod)
-        }
         s[index] = combo
-        updateShortcuts(s)
-    }
-
-    private func updateShortcutKey(at index: Int, key: String) {
-        var s = currentShortcuts
-        s[index] = KeyCombo(modifiers: s[index].modifiers, key: key)
         updateShortcuts(s)
     }
 
@@ -640,14 +616,6 @@ struct ActionBuilderView: View {
         return result
     }
 
-    private func modLabel(_ mod: Modifier) -> String {
-        switch mod {
-        case .cmd: return "Cmd"
-        case .shift: return "Shift"
-        case .opt: return "Opt"
-        case .ctrl: return "Ctrl"
-        }
-    }
 }
 
 // MARK: - ActionTypeTag

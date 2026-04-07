@@ -11,8 +11,9 @@ struct TaktApp: App {
             if let vm = appDelegate.vm {
                 TaskListView(vm: vm, openEditor: { params in
                     appDelegate.editorParams = params
-                    NSApp.activate(ignoringOtherApps: true)
+                    appDelegate.dismissPopover()
                     openWindow(id: "editor")
+                    NSApp.activate(ignoringOtherApps: true)
                 })
             } else {
                 ProgressView("Starting...")
@@ -25,7 +26,7 @@ struct TaktApp: App {
         // Params are stored on AppDelegate before calling openWindow(id:).
         // .id(editorParams) forces SwiftUI to destroy and recreate EditorWindowContent
         // when params change, ensuring a fresh ViewModel for each edit/new task.
-        Window("Editor", id: "editor") {
+        Window("", id: "editor") {
             if let core = appDelegate.core, let params = appDelegate.editorParams {
                 EditorWindowContent(
                     core: core,
@@ -36,7 +37,7 @@ struct TaktApp: App {
             }
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 480, height: 600)
+        .defaultSize(width: 500, height: 600)
     }
 }
 
@@ -159,6 +160,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 print("Failed to initialize Takt: \(error)")
             }
+        }
+    }
+
+    /// Dismiss the MenuBarExtra popover by clicking its status bar button.
+    /// This triggers the native dismiss path so the icon highlight resets correctly.
+    func dismissPopover() {
+        for window in NSApp.windows {
+            // The MenuBarExtra panel holds a reference to its status item button
+            guard let statusItem = window.value(forKey: "statusItem") as? NSStatusItem,
+                  let button = statusItem.button else { continue }
+            button.performClick(nil)
+            return
         }
     }
 

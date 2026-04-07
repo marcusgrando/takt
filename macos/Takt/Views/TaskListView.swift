@@ -56,7 +56,7 @@ struct TaskListView: View {
                 } label: {
                     Label("Quit", systemImage: "power")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary.opacity(0.6))
                 }
                 .buttonStyle(.borderless)
                 Spacer()
@@ -65,7 +65,7 @@ struct TaskListView: View {
                 } label: {
                     Label("History", systemImage: "clock")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary.opacity(0.6))
                 }
                 .buttonStyle(.borderless)
             }
@@ -73,6 +73,7 @@ struct TaskListView: View {
             .frame(height: 40)
         }
         .frame(width: 280, height: 400)
+        .background(PopoverEscHandler())
     }
 
     @ViewBuilder
@@ -128,5 +129,63 @@ struct TaskListView: View {
                 }
             }
         }
+    }
+}
+
+/// Closes the MenuBarExtra popover when Escape is pressed.
+/// Uses a local event monitor that works regardless of first responder.
+struct PopoverEscHandler: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.parentWindow = view.window
+            context.coordinator.startMonitor()
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stopMonitor()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    class Coordinator {
+        weak var parentWindow: NSWindow?
+        private var monitor: Any?
+
+        func startMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, event.keyCode == 53, // Escape
+                      let window = self.parentWindow, window.isKeyWindow else {
+                    return event
+                }
+                // Defer to next run loop to avoid conflicting with current event processing.
+                // The performClick must happen after the ESC event is fully consumed.
+                DispatchQueue.main.async {
+                    // Try native dismiss via status item button (resets highlight)
+                    for w in NSApp.windows {
+                        if let si = w.value(forKey: "statusItem") as? NSStatusItem,
+                           let button = si.button {
+                            button.performClick(nil)
+                            return
+                        }
+                    }
+                    // Fallback: brute-force hide
+                    window.orderOut(nil)
+                }
+                return nil
+            }
+        }
+
+        func stopMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        deinit { stopMonitor() }
     }
 }
