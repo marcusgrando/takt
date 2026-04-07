@@ -145,9 +145,11 @@ impl AppScheduler {
                 let notify = task.notify_on_run;
                 let bridge = self.bridge.clone();
                 let action = task.action.clone();
+                let schedule = task.schedule.clone();
                 tokio::spawn(async move {
                     let _ = execute_and_log(
                         &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
+                        &schedule,
                     )
                     .await;
                 });
@@ -160,6 +162,7 @@ impl AppScheduler {
         let task_name = task.name.clone();
         let notify = task.notify_on_run;
         let action = task.action.clone();
+        let schedule = task.schedule.clone();
         let executor = Arc::clone(&self.executor);
         let store = Arc::clone(&self.store);
         let bridge = self.bridge.clone();
@@ -171,6 +174,7 @@ impl AppScheduler {
 
                 let job = Job::new_async_tz(expr.as_str(), Local, move |_uuid, _lock| {
                     let action = action.clone();
+                    let schedule = schedule.clone();
                     let executor = Arc::clone(&executor);
                     let store = Arc::clone(&store);
                     let task_id = task_id.clone();
@@ -190,6 +194,7 @@ impl AppScheduler {
                         }
                         let _ = execute_and_log(
                             &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
+                            &schedule,
                         )
                         .await;
                     })
@@ -230,6 +235,7 @@ impl AppScheduler {
                         }
                         let _ = execute_and_log(
                             &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
+                            &schedule,
                         )
                         .await;
                         tokens.lock().await.remove(&task_id);
@@ -255,6 +261,7 @@ impl AppScheduler {
                         task_name,
                         notify,
                         action,
+                        schedule,
                     )
                     .await;
                 });
@@ -293,6 +300,7 @@ async fn daily_first_use_loop(
     task_name: String,
     notify: bool,
     action: Action,
+    schedule: Schedule,
 ) {
     const TICK_SECS: u64 = 30;
     // If a tick takes more than 10 minutes, the system was truly asleep (not just throttled)
@@ -346,7 +354,7 @@ async fn daily_first_use_loop(
                     _ => return, // deleted
                 }
                 let _ = execute_and_log(
-                    &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
+                    &*executor, &store, &*bridge, &task_id, &task_name, notify, &action, &schedule,
                 )
                 .await;
                 break;
@@ -380,8 +388,17 @@ async fn wait_until_tomorrow_or_cancel(cancel: &CancellationToken) -> bool {
     }
 }
 
+/// Compute the next fire time for a cron expression from now.
+fn next_cron_fire(expression: &str) -> Option<String> {
+    let expr = normalize_cron(expression);
+    let cron = croner::Cron::new(&expr).parse().ok()?;
+    let next = cron.find_next_occurrence(&Local::now(), false).ok()?;
+    Some(next.to_rfc3339())
+}
+
 /// Execute an action, log the result, and optionally notify.
 /// Returns Ok(()) on success, Err(message) on execution failure.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_and_log(
     executor: &dyn ActionExecutor,
     store: &TaskStore,
@@ -390,6 +407,7 @@ pub(crate) async fn execute_and_log(
     task_name: &str,
     notify: bool,
     action: &Action,
+    schedule: &Schedule,
 ) -> Result<(), String> {
     let result = executor.execute(action).await;
     let (status, stdout, stderr, error) = match &result {
@@ -402,7 +420,11 @@ pub(crate) async fn execute_and_log(
     let _ = store
         .log_execution(task_id, status, stdout, stderr, error.clone())
         .await;
-    let _ = store.update_last_run(task_id, None).await;
+    let next_run = match schedule {
+        Schedule::Cron { expression } => next_cron_fire(expression),
+        _ => None,
+    };
+    let _ = store.update_last_run(task_id, next_run).await;
     match result {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),

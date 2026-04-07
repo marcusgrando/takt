@@ -24,17 +24,26 @@ struct ActionBuilderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Type selector
-            Picker("Type", selection: Binding(
-                get: { actionType },
-                set: { handleTypeChange($0) }
-            )) {
-                ForEach(ActionTypeTag.allCases) { tag in
-                    Text(tag.label).tag(tag)
+            // Type selector (two rows to avoid text truncation)
+            VStack(spacing: 2) {
+                HStack(spacing: 2) {
+                    ForEach(ActionTypeTag.allCases.prefix(4)) { tag in
+                        actionTypeButton(tag)
+                    }
+                }
+                HStack(spacing: 2) {
+                    ForEach(ActionTypeTag.allCases.suffix(3)) { tag in
+                        actionTypeButton(tag)
+                    }
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .padding(2)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
 
             // Type-specific fields
             switch action {
@@ -59,6 +68,24 @@ struct ActionBuilderView: View {
                 postShortcutsSection
             }
         }
+    }
+
+    @ViewBuilder
+    private func actionTypeButton(_ tag: ActionTypeTag) -> some View {
+        Button {
+            handleTypeChange(tag)
+        } label: {
+            Label(tag.label, systemImage: tag.systemImage)
+                .font(.system(size: 11))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(actionType == tag ? Color.accentColor : Color.clear)
+        .foregroundStyle(actionType == tag ? .white : .primary)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     // MARK: - OpenFile
@@ -243,9 +270,18 @@ struct ActionBuilderView: View {
                     HStack(spacing: 4) {
                         Text("Arguments")
                             .font(.system(size: 12, weight: .medium))
-                        Text("(one per line)")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                        Group {
+                            switch shell {
+                            case .sh, .bash, .zsh:
+                                Text("(appended to command as shell text)")
+                            case .python:
+                                Text("(one per line, passed as sys.argv)")
+                            case .appleScript:
+                                Text("(one per line)")
+                            }
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                     }
                     TextEditor(text: Binding(
                         get: { args.joined(separator: "\n") },
@@ -505,14 +541,16 @@ struct ActionBuilderView: View {
                         }
                         .buttonStyle(.borderless)
                         .help("Remove shortcut")
+
+                        if index == shortcuts.count - 1 {
+                            Button("+ Add shortcut") {
+                                addShortcut()
+                            }
+                            .font(.system(size: 13))
+                            .buttonStyle(.borderless)
+                        }
                     }
                 }
-
-                Button("+ Add shortcut") {
-                    addShortcut()
-                }
-                .font(.system(size: 13))
-                .buttonStyle(.borderless)
 
                 // Delay
                 HStack(spacing: 4) {
@@ -580,22 +618,7 @@ struct ActionBuilderView: View {
     // MARK: - Type Change
 
     private func handleTypeChange(_ tag: ActionTypeTag) {
-        switch tag {
-        case .openFile:
-            action = .openFile(path: "", app: nil, postShortcuts: [], shortcutDelaySecs: 1)
-        case .openUrl:
-            action = .openUrl(url: "", browser: nil, postShortcuts: [], shortcutDelaySecs: 1)
-        case .openApp:
-            action = .openApp(appPath: "", postShortcuts: [], shortcutDelaySecs: 1)
-        case .runCommand:
-            action = .runCommand(command: "", args: [], shell: .zsh)
-        case .notify:
-            action = .notify(title: "", body: "", sound: true)
-        case .webhook:
-            action = .webhook(url: "", method: .get, headers: [:], body: nil)
-        case .settings:
-            action = .settings(paneUrl: "x-apple.systempreferences:com.apple.settings.General")
-        }
+        action = tag.template.defaultAction
     }
 
     // MARK: - Header Helpers
@@ -630,10 +653,34 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .openUrl: return "URL"
         case .openFile: return "File"
         case .openApp: return "App"
-        case .runCommand: return "Cmd"
+        case .runCommand: return "Command"
         case .notify: return "Notify"
         case .webhook: return "Hook"
         case .settings: return "Settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .openUrl: return "link"
+        case .openFile: return "doc"
+        case .openApp: return "macwindow"
+        case .runCommand: return "terminal"
+        case .notify: return "bell"
+        case .webhook: return "globe"
+        case .settings: return "gearshape"
+        }
+    }
+
+    var template: ActionTemplate {
+        switch self {
+        case .openUrl: return .openUrl
+        case .openFile: return .openFile
+        case .openApp: return .openApp
+        case .runCommand: return .runCommand
+        case .notify: return .notify
+        case .webhook: return .webhook
+        case .settings: return .settings
         }
     }
 }

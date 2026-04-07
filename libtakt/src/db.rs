@@ -7,8 +7,8 @@ pub async fn connect() -> anyhow::Result<SqlitePool> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Dev mode: recreate DB every launch to avoid migration conflicts
-    if cfg!(debug_assertions) {
+    // Opt-in DB reset: set TAKT_RESET_DB=1 to recreate DB on launch
+    if std::env::var("TAKT_RESET_DB").is_ok() {
         let _ = std::fs::remove_file(&db_path);
     }
 

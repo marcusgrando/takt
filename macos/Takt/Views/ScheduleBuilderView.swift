@@ -5,7 +5,6 @@ struct ScheduleBuilderView: View {
 
     @State private var recurring: RecurringState = defaultRecurring
     @State private var oneShotDate = Date()
-    @State private var initialized = false
 
     private var scheduleType: ScheduleTypeTag {
         switch schedule {
@@ -18,16 +17,31 @@ struct ScheduleBuilderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Schedule type tabs
-            Picker("Type", selection: Binding(
-                get: { scheduleType },
-                set: { handleTypeChange($0) }
-            )) {
+            HStack(spacing: 2) {
                 ForEach(ScheduleTypeTag.allCases) { tag in
-                    Text(tag.label).tag(tag)
+                    Button {
+                        handleTypeChange(tag)
+                    } label: {
+                        Label(tag.label, systemImage: tag.systemImage)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(scheduleType == tag ? Color.accentColor : Color.clear)
+                    .foregroundStyle(scheduleType == tag ? .white : .primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .padding(2)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
 
             // Type-specific content
             switch schedule {
@@ -40,20 +54,10 @@ struct ScheduleBuilderView: View {
             }
         }
         .onAppear {
-            guard !initialized else { return }
-            initialized = true
-            if case .cron(let expression) = schedule {
-                recurring = parseCron(expression)
-            }
-            if case .oneShot(let runAt) = schedule {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let date = formatter.date(from: runAt) ?? ISO8601DateFormatter().date(from: runAt) {
-                    oneShotDate = date
-                } else {
-                    oneShotDate = Date().addingTimeInterval(3600)
-                }
-            }
+            syncStateFromSchedule()
+        }
+        .onChange(of: schedule) {
+            syncStateFromSchedule()
         }
     }
 
@@ -264,6 +268,34 @@ struct ScheduleBuilderView: View {
 
     // MARK: - Helpers
 
+    private func syncStateFromSchedule() {
+        if case .cron(let expression) = schedule {
+            // Don't re-parse when the change originated from the custom expression field,
+            // otherwise parseCron may recognize a preset and switch away from Custom mode.
+            if recurring.frequency == .custom && expression == recurring.customExpression {
+                return
+            }
+            let parsed = parseCron(expression)
+            if parsed != recurring {
+                recurring = parsed
+            }
+        }
+        if case .oneShot(let runAt) = schedule {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: runAt) ?? ISO8601DateFormatter().date(from: runAt) {
+                if date != oneShotDate {
+                    oneShotDate = date
+                }
+            } else {
+                let fallback = Date().addingTimeInterval(3600)
+                if fallback != oneShotDate {
+                    oneShotDate = fallback
+                }
+            }
+        }
+    }
+
     private func handleTypeChange(_ tag: ScheduleTypeTag) {
         switch tag {
         case .cron:
@@ -293,6 +325,14 @@ enum ScheduleTypeTag: String, CaseIterable, Identifiable {
         case .cron: return "Recurring"
         case .oneShot: return "One time"
         case .dailyFirstUse: return "Daily first use"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .cron: return "repeat"
+        case .oneShot: return "1.circle"
+        case .dailyFirstUse: return "sunrise"
         }
     }
 }

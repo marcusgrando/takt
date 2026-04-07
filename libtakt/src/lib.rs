@@ -127,9 +127,7 @@ impl TaktCore {
         tokio_runtime()
             .spawn(async move { Ok(store.list_tasks().await?) })
             .await
-            .map_err(|e| TaktError::Database {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
     }
 
     pub async fn get_task(&self, id: String) -> Result<Option<TaskDto>, TaktError> {
@@ -137,9 +135,7 @@ impl TaktCore {
         tokio_runtime()
             .spawn(async move { Ok(store.get_task(&id).await?) })
             .await
-            .map_err(|e| TaktError::Database {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
     }
 
     /// Create task with rollback on scheduler failure.
@@ -166,7 +162,14 @@ impl TaktCore {
                             errors.push(format!("rollback delete failed: {}", rb_err));
                             if let Err(dis_err) = store
                                 .update_task(
-                                    &task.id, None, None, Some(false), None, None, None, None,
+                                    &task.id,
+                                    None,
+                                    None,
+                                    Some(false),
+                                    None,
+                                    None,
+                                    None,
+                                    None,
                                 )
                                 .await
                             {
@@ -184,9 +187,7 @@ impl TaktCore {
                 Ok(task)
             })
             .await
-            .map_err(|e| TaktError::Scheduler {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?
     }
 
     /// Update task with full rollback chain.
@@ -195,12 +196,13 @@ impl TaktCore {
         let scheduler = self.scheduler()?.clone();
         tokio_runtime()
             .spawn(async move {
-                let old_task = store
-                    .get_task(&params.id)
-                    .await?
-                    .ok_or_else(|| TaktError::NotFound {
-                        msg: "Task not found".to_string(),
-                    })?;
+                let old_task =
+                    store
+                        .get_task(&params.id)
+                        .await?
+                        .ok_or_else(|| TaktError::NotFound {
+                            msg: "Task not found".to_string(),
+                        })?;
 
                 scheduler
                     .remove_task(&params.id)
@@ -252,17 +254,21 @@ impl TaktCore {
                         match db_reverted {
                             Ok(_) => {
                                 if old_task.enabled {
-                                    if let Err(rb_err) =
-                                        scheduler.schedule_task(&old_task).await
-                                    {
+                                    if let Err(rb_err) = scheduler.schedule_task(&old_task).await {
                                         errors.push(format!(
                                             "rollback re-schedule failed: {}",
                                             rb_err
                                         ));
                                         if let Err(dis_err) = store
                                             .update_task(
-                                                &params.id, None, None, Some(false), None,
-                                                None, None, None,
+                                                &params.id,
+                                                None,
+                                                None,
+                                                Some(false),
+                                                None,
+                                                None,
+                                                None,
+                                                None,
                                             )
                                             .await
                                         {
@@ -278,8 +284,14 @@ impl TaktCore {
                                 errors.push(format!("rollback failed: {}", rb_err));
                                 if let Err(dis_err) = store
                                     .update_task(
-                                        &params.id, None, None, Some(false), None, None,
-                                        None, None,
+                                        &params.id,
+                                        None,
+                                        None,
+                                        Some(false),
+                                        None,
+                                        None,
+                                        None,
+                                        None,
                                     )
                                     .await
                                 {
@@ -298,9 +310,7 @@ impl TaktCore {
                 Ok(task)
             })
             .await
-            .map_err(|e| TaktError::Scheduler {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?
     }
 
     pub async fn delete_task(&self, id: String) -> Result<(), TaktError> {
@@ -316,9 +326,7 @@ impl TaktCore {
                 Ok(())
             })
             .await
-            .map_err(|e| TaktError::Scheduler {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?
     }
 
     pub async fn run_task_now(&self, id: String) -> Result<(), TaktError> {
@@ -341,14 +349,13 @@ impl TaktCore {
                     &task.name,
                     task.notify_on_run,
                     &task.action,
+                    &task.schedule,
                 )
                 .await
                 .map_err(|msg| TaktError::Execution { msg })
             })
             .await
-            .map_err(|e| TaktError::Execution {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Execution { msg: e.to_string() })?
     }
 
     pub async fn list_logs(
@@ -364,9 +371,7 @@ impl TaktCore {
                     .await?)
             })
             .await
-            .map_err(|e| TaktError::Database {
-                msg: e.to_string(),
-            })?
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
     }
 
     pub fn validate_cron(&self, expression: String) -> Result<(), TaktError> {
