@@ -17,23 +17,11 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install frontend dependencies
-        run: bun install
-
       - name: Rust format check
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+        run: cargo fmt -- --check
 
       - name: Rust clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-
-      - name: TypeScript type check
-        run: bun run typecheck
-
-      - name: Frontend build
-        run: bun run build
+        run: cargo clippy -- -D warnings
 
       - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test
