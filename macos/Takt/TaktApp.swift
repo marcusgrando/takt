@@ -190,14 +190,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appToReactivate = frontApp.processIdentifier == currentPID ? nil : frontApp
     }
 
+    /// Called by macOS when the last "real" window closes.
+    /// The MenuBarExtra panel is not counted, so this fires when the editor closes.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        hideFromDock()
+        return false // Don't terminate — keep running as menu bar app
+    }
+
     /// Hides the app from Dock and Cmd+Tab switcher.
-    /// Called explicitly when the editor window is about to close.
     func hideFromDock() {
-        NSApp.setActivationPolicy(.accessory)
-        if let appToReactivate {
-            appToReactivate.activate()
-        }
+        let previous = appToReactivate
         appToReactivate = nil
+
+        // 1. Order out any lingering non-MenuBarExtra windows.
+        //    SwiftUI Window scenes can leave hidden NSWindows that prevent
+        //    macOS from honoring the activation policy change.
+        for window in NSApp.windows {
+            if window.value(forKey: "statusItem") is NSStatusItem { continue }
+            if window.isVisible { window.orderOut(nil) }
+        }
+
+        // 2. Cooperatively yield activation (macOS 14+).
+        if let previous, !previous.isTerminated {
+            NSApp.yieldActivation(to: previous)
+        } else if let next = NSWorkspace.shared.runningApplications
+            .first(where: { $0.activationPolicy == .regular && $0 != .current }) {
+            NSApp.yieldActivation(to: next)
+        } else {
+            NSApp.deactivate()
+        }
+
+        // 3. The prohibited toggle trick: going through .prohibited forces
+        //    macOS to fully evict us from the Cmd+Tab switcher before we
+        //    settle on .accessory.
+        NSApp.setActivationPolicy(.prohibited)
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     // I7: Single instance enforcement
