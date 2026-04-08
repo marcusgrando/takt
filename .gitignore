@@ -1,23 +1,23 @@
-# Logs
-logs
-*.log
-bun-debug.log*
+# Rust
+target/
 
-node_modules
-dist
-dist-ssr
-*.local
+# UniFFI generated bindings (rebuilt by build-rust.sh)
+macos/Takt/Generated/
+
+# Xcode
+build/
+macos/Takt.xcodeproj/xcuserdata/
+macos/Takt.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Legacy Vite build output
+dist/
+
+# Dependencies (legacy, to be removed)
+node_modules/
 
 # Claude Code
 .claude/
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
