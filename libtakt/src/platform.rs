@@ -14,6 +14,10 @@ pub trait PlatformBridge: Send + Sync {
     /// Swift MUST use DispatchQueue.main.async (not .sync) to avoid deadlock,
     /// then call `execute_callback(callbackId)` to run the closure.
     fn run_on_main_sync(&self, callback_id: u64);
+
+    /// Returns true when the user is actively present: screen is unlocked
+    /// AND there has been HID input (keyboard/mouse) within `idle_threshold_secs`.
+    fn is_user_active(&self, idle_threshold_secs: u64) -> bool;
 }
 
 // ── Callback Registry ────────────────────────────────────────────────

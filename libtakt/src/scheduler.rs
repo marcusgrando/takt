@@ -286,9 +286,10 @@ impl AppScheduler {
 }
 
 /// Runs the DailyFirstUse logic in a loop that re-arms each day.
-/// Uses wall-clock elapsed time instead of a fixed threshold to detect sleep:
-/// only the actual elapsed time beyond the expected tick counts as accumulated.
-/// This avoids false sleep detection from macOS App Nap / timer throttling.
+///
+/// Accumulates time only when the user is truly active: screen unlocked AND
+/// recent HID input (keyboard/mouse). Resets the accumulator after system
+/// sleep or prolonged user inactivity (> IDLE_RESET_SECS without input).
 #[allow(clippy::too_many_arguments)]
 async fn daily_first_use_loop(
     cancel: CancellationToken,
@@ -303,21 +304,25 @@ async fn daily_first_use_loop(
     schedule: Schedule,
 ) {
     const TICK_SECS: u64 = 30;
-    // If a tick takes more than 10 minutes, the system was truly asleep (not just throttled)
+    // If a tick takes more than 10 minutes, the system was truly asleep
     const SLEEP_THRESHOLD_SECS: u64 = 600;
+    // Consider user idle if no HID input for this many seconds
+    const IDLE_THRESHOLD_SECS: u64 = 60;
+    // Reset accumulator after this many consecutive idle ticks
+    const IDLE_RESET_SECS: u64 = 300;
 
     loop {
         // Skip if already ran today
         if ran_today(&store, &task_id).await {
-            // Wait until just past midnight, then re-check
             if wait_until_tomorrow_or_cancel(&cancel).await {
-                return; // cancelled
+                return;
             }
             continue;
         }
 
-        // Accumulate active time in TICK_SECS intervals
         let mut accumulated_secs: u64 = 0;
+        let mut consecutive_idle_secs: u64 = 0;
+
         loop {
             let before = std::time::Instant::now();
             tokio::select! {
@@ -326,17 +331,30 @@ async fn daily_first_use_loop(
             }
             let elapsed = before.elapsed().as_secs();
 
+            // System was truly asleep — reset everything
             if elapsed > SLEEP_THRESHOLD_SECS {
-                // System was truly asleep — reset
                 accumulated_secs = 0;
+                consecutive_idle_secs = 0;
                 if ran_today(&store, &task_id).await {
                     break;
                 }
                 continue;
             }
 
-            // Count actual elapsed time (handles minor throttling gracefully)
-            accumulated_secs += elapsed.min(TICK_SECS * 2);
+            // Check real user activity: screen unlocked + recent HID input
+            let user_active = bridge.is_user_active(IDLE_THRESHOLD_SECS);
+
+            if user_active {
+                consecutive_idle_secs = 0;
+                accumulated_secs += elapsed.min(TICK_SECS * 2);
+            } else {
+                consecutive_idle_secs += elapsed.min(TICK_SECS * 2);
+                // Reset accumulator after prolonged inactivity
+                if consecutive_idle_secs >= IDLE_RESET_SECS {
+                    accumulated_secs = 0;
+                }
+            }
+
             if accumulated_secs >= required_secs {
                 // Final guard: re-check enabled + not yet ran today
                 match store.get_task(&task_id).await {
@@ -351,7 +369,7 @@ async fn daily_first_use_loop(
                             .await;
                         break;
                     }
-                    _ => return, // deleted
+                    _ => return,
                 }
                 let _ = execute_and_log(
                     &*executor, &store, &*bridge, &task_id, &task_name, notify, &action, &schedule,
@@ -363,7 +381,7 @@ async fn daily_first_use_loop(
 
         // Wait until tomorrow to re-arm
         if wait_until_tomorrow_or_cancel(&cancel).await {
-            return; // cancelled
+            return;
         }
     }
 }

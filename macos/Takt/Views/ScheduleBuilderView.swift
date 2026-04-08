@@ -243,7 +243,7 @@ struct ScheduleBuilderView: View {
     private var dailyFirstUseContent: some View {
         if case .dailyFirstUse(let delayMinutes) = schedule {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Runs once per day after continuous active use of your Mac.")
+                Text("Runs once per day after active keyboard/mouse use with screen unlocked.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
