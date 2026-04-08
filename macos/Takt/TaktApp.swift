@@ -108,7 +108,7 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
     var defaultAction: Action {
         switch self {
         case .openUrl:
-            return .openUrl(url: "", browser: nil, postShortcuts: [], shortcutDelaySecs: 1)
+            return .openUrl(urls: [""], browser: nil, postShortcuts: [], shortcutDelaySecs: 1)
         case .openFile:
             return .openFile(path: "", app: nil, postShortcuts: [], shortcutDelaySecs: 1)
         case .openApp:

@@ -165,16 +165,51 @@ struct ActionBuilderView: View {
 
     @ViewBuilder
     private var openUrlFields: some View {
-        if case .openUrl(let url, let browser, let shortcuts, let delay) = action {
+        if case .openUrl(let urls, let browser, let shortcuts, let delay) = action {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("URL")
-                        .font(.system(size: 12, weight: .medium))
-                    TextField("https://example.com", text: Binding(
-                        get: { url },
-                        set: { action = .openUrl(url: $0, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay) }
-                    ))
-                    .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Text("URLs")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Button {
+                            action = .openUrl(urls: urls + [""], browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Add URL")
+                    }
+
+                    ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                        HStack(spacing: 4) {
+                            TextField("https://example.com", text: Binding(
+                                get: { url },
+                                set: {
+                                    var newUrls = urls
+                                    newUrls[index] = $0
+                                    action = .openUrl(urls: newUrls, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+
+                            if urls.count > 1 {
+                                Button {
+                                    var newUrls = urls
+                                    newUrls.remove(at: index)
+                                    action = .openUrl(urls: newUrls, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove URL")
+                            }
+                        }
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -189,7 +224,7 @@ struct ActionBuilderView: View {
                         get: { browser ?? "__default__" },
                         set: {
                             let newBrowser: String? = $0 == "__default__" ? nil : $0
-                            action = .openUrl(url: url, browser: newBrowser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
+                            action = .openUrl(urls: urls, browser: newBrowser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
                         }
                     )) {
                         Text("Default browser").tag("__default__")
@@ -487,7 +522,7 @@ struct ActionBuilderView: View {
     private var currentShortcuts: [KeyCombo] {
         switch action {
         case .openFile(_, _, let s, _): return s
-        case .openUrl(_, _, let s, _): return s
+        case .openUrl(_, _, let s, _): return s  // urls, browser, shortcuts, delay
         case .openApp(_, let s, _): return s
         default: return []
         }
@@ -510,10 +545,12 @@ struct ActionBuilderView: View {
             Divider()
 
             if shortcuts.isEmpty {
-                Button("+ Run shortcuts after open") {
+                Button {
                     addShortcut()
+                } label: {
+                    Label("Run shortcuts after open", systemImage: "plus.circle.fill")
+                        .font(.system(size: 13))
                 }
-                .font(.system(size: 13))
                 .buttonStyle(.borderless)
             } else {
                 Text("SHORTCUTS AFTER OPEN")
@@ -543,11 +580,15 @@ struct ActionBuilderView: View {
                         .help("Remove shortcut")
 
                         if index == shortcuts.count - 1 {
-                            Button("+ Add shortcut") {
+                            Button {
                                 addShortcut()
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.system(size: 13))
                             .buttonStyle(.borderless)
+                            .help("Add shortcut")
                         }
                     }
                 }
@@ -595,8 +636,8 @@ struct ActionBuilderView: View {
         switch action {
         case .openFile(let path, let app, _, let delay):
             action = .openFile(path: path, app: app, postShortcuts: shortcuts, shortcutDelaySecs: delay)
-        case .openUrl(let url, let browser, _, let delay):
-            action = .openUrl(url: url, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
+        case .openUrl(let urls, let browser, _, let delay):
+            action = .openUrl(urls: urls, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
         case .openApp(let appPath, _, let delay):
             action = .openApp(appPath: appPath, postShortcuts: shortcuts, shortcutDelaySecs: delay)
         default: break
@@ -607,8 +648,8 @@ struct ActionBuilderView: View {
         switch action {
         case .openFile(let path, let app, let shortcuts, _):
             action = .openFile(path: path, app: app, postShortcuts: shortcuts, shortcutDelaySecs: delay)
-        case .openUrl(let url, let browser, let shortcuts, _):
-            action = .openUrl(url: url, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
+        case .openUrl(let urls, let browser, let shortcuts, _):
+            action = .openUrl(urls: urls, browser: browser, postShortcuts: shortcuts, shortcutDelaySecs: delay)
         case .openApp(let appPath, let shortcuts, _):
             action = .openApp(appPath: appPath, postShortcuts: shortcuts, shortcutDelaySecs: delay)
         default: break

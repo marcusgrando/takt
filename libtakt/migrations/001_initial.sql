@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     name TEXT NOT NULL,
     description TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
+    run_if_missed INTEGER NOT NULL DEFAULT 1,
+    notify_on_run INTEGER NOT NULL DEFAULT 0,
     schedule_json TEXT NOT NULL,
     action_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -16,7 +18,7 @@ CREATE TABLE IF NOT EXISTS execution_logs (
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('success', 'failure', 'skipped')),
+    status TEXT NOT NULL CHECK(status IN ('success', 'failure', 'skipped', 'schedule_error')),
     stdout TEXT,
     stderr TEXT,
     error TEXT

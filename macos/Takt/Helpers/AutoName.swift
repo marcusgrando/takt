@@ -10,13 +10,21 @@ enum AutoName {
 
     private static func describeAction(_ action: Action) -> String {
         switch action {
-        case .openUrl(let url, _, _, _):
-            if url.isEmpty { return "Open URL" }
-            if let parsed = URL(string: url), let host = parsed.host {
+        case .openUrl(let urls, _, _, _):
+            let nonEmpty = urls.filter { !$0.isEmpty }
+            if nonEmpty.isEmpty { return "Open URL" }
+            let first = nonEmpty[0]
+            let label: String
+            if let parsed = URL(string: first), let host = parsed.host {
                 let clean = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-                return "Open \(clean)"
+                label = clean
+            } else {
+                label = String(first.prefix(30))
             }
-            return "Open \(String(url.prefix(30)))"
+            if nonEmpty.count > 1 {
+                return "Open \(label) +\(nonEmpty.count - 1)"
+            }
+            return "Open \(label)"
 
         case .openFile(let path, _, _, _):
             if path.isEmpty { return "Open file" }

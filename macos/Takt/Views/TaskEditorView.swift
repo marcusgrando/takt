@@ -86,10 +86,12 @@ struct TaskEditorView: View {
 
                     // Description
                     if !vm.showDescription {
-                        Button("+ Add description") {
+                        Button {
                             vm.showDescription = true
+                        } label: {
+                            Label("Add description", systemImage: "plus.circle.fill")
+                                .font(.system(size: 13))
                         }
-                        .font(.system(size: 13))
                         .buttonStyle(.borderless)
                     } else {
                         VStack(alignment: .leading, spacing: 6) {

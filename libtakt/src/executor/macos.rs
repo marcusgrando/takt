@@ -44,15 +44,19 @@ impl ActionExecutor for MacosExecutor {
                 })
             }
             Action::OpenUrl {
-                url,
+                urls,
                 browser,
                 post_shortcuts,
                 shortcut_delay_secs,
             } => {
-                let url = url.clone();
-                let browser = browser.clone();
-                platform::run_on_main(&*self.bridge, move || open_url(&url, browser.as_deref()))
+                for url in urls {
+                    let url = url.clone();
+                    let browser = browser.clone();
+                    platform::run_on_main(&*self.bridge, move || {
+                        open_url(&url, browser.as_deref())
+                    })
                     .await?;
+                }
                 if !post_shortcuts.is_empty() {
                     wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }

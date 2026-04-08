@@ -164,9 +164,10 @@ final class TaskEditorViewModel {
             if path.trimmingCharacters(in: .whitespaces).isEmpty {
                 error = "File path is required"; return false
             }
-        case .openUrl(let url, _, _, _):
-            if url.trimmingCharacters(in: .whitespaces).isEmpty {
-                error = "URL is required"; return false
+        case .openUrl(let urls, _, _, _):
+            let hasValidUrl = urls.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            if !hasValidUrl {
+                error = "At least one URL is required"; return false
             }
         case .openApp(let appPath, _, _):
             if appPath.trimmingCharacters(in: .whitespaces).isEmpty {
