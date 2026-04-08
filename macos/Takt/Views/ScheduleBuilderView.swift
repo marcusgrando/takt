@@ -133,7 +133,7 @@ struct ScheduleBuilderView: View {
 
     @ViewBuilder
     private var monthlyContent: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             // Each / On the radio
             VStack(alignment: .leading, spacing: 8) {
                 HStack {

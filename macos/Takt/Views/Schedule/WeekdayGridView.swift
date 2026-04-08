@@ -15,7 +15,7 @@ struct WeekdayGridView: View {
                     Text(days[i])
                         .font(.system(size: 11, weight: .medium))
                         .frame(maxWidth: .infinity)
-                        .frame(height: 32)
+                        .frame(height: 26)
                         .background(selected.contains(i) ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
                         .foregroundStyle(selected.contains(i) ? .white : .primary)
                         .clipShape(RoundedRectangle(cornerRadius: 4))

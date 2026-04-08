@@ -14,7 +14,7 @@ struct DayGridView: View {
                 } label: {
                     Text("\(day)")
                         .font(.system(size: 11, weight: .medium))
-                        .frame(width: 28, height: 28)
+                        .frame(width: 56, height: 28)
                         .background(selected.contains(day) ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
                         .foregroundStyle(selected.contains(day) ? .white : .primary)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
