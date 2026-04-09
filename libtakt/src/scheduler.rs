@@ -32,7 +32,7 @@ fn missed_cron_run(expression: &str, last_run_at: Option<&str>) -> bool {
     };
 
     let expr = normalize_cron(expression);
-    let cron = match croner::Cron::new(&expr).parse() {
+    let cron: croner::Cron = match expr.parse() {
         Ok(c) => c,
         Err(_) => return false,
     };
@@ -409,7 +409,7 @@ async fn wait_until_tomorrow_or_cancel(cancel: &CancellationToken) -> bool {
 /// Compute the next fire time for a cron expression from now.
 fn next_cron_fire(expression: &str) -> Option<String> {
     let expr = normalize_cron(expression);
-    let cron = croner::Cron::new(&expr).parse().ok()?;
+    let cron: croner::Cron = expr.parse().ok()?;
     let next = cron.find_next_occurrence(&Local::now(), false).ok()?;
     Some(next.to_rfc3339())
 }

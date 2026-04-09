@@ -375,9 +375,10 @@ impl TaktCore {
     }
 
     pub fn validate_cron(&self, expression: String) -> Result<(), TaktError> {
-        croner::Cron::new(expression.trim())
-            .with_seconds_optional()
-            .parse()
+        croner::parser::CronParser::builder()
+            .seconds(croner::parser::Seconds::Optional)
+            .build()
+            .parse(expression.trim())
             .map(|_| ())
             .map_err(|e| TaktError::Validation {
                 msg: format!("Invalid cron expression: {}", e),
