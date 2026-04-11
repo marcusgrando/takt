@@ -1,5 +1,6 @@
 uniffi::setup_scaffolding!();
 
+pub mod calendar;
 mod db;
 mod error;
 mod executor;
