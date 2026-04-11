@@ -631,12 +631,12 @@ git commit -m "feat(calendar): expose OpenEventLinks action button (real form at
 
 - [ ] **Step 1: Render the badge in `TaskItemView` with tooltip and click handling**
 
-Find where `TaskItemView` renders the action label row (around line 134 in Phase 1 exploration). Immediately after the label, add a conditional badge based on `task.health`. The badge MUST have (a) a `.help()` tooltip and (b) a click handler that opens the task in the editor, per spec §7.6:
+Find where `TaskItemView` renders the action label row (around line 134 in Phase 1 exploration). Immediately after the label, add a conditional badge based on `task.health`. The badge MUST have (a) a `.help()` tooltip and (b) a click handler that opens the task in the editor, per spec §7.6. Reuse the **exact** wiring used by the existing edit button at `TaskItemView.swift:68` — `openEditor(EditorParams(taskId: task.id, template: nil))`:
 
 ```swift
         if task.health != .healthy {
             Button {
-                onEdit(task)
+                openEditor(EditorParams(taskId: task.id, template: nil))
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: healthBadgeIcon(task.health))
@@ -655,7 +655,7 @@ Find where `TaskItemView` renders the action label row (around line 134 in Phase
         }
 ```
 
-The `onEdit(task)` closure is the same one used by the existing edit button in `TaskItemView`. Find how the existing edit row wires into it and reuse the same callback — the badge click is a shortcut for "open this task in the editor" so the user can fix or delete it.
+`openEditor` is the same `OpenWindowAction`-style callback already captured by `TaskItemView` for its existing edit button — no new prop, no new plumbing.
 
 Add these helper functions to the same file (private to `TaskItemView`):
 
