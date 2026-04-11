@@ -135,19 +135,6 @@ final class TaskEditorViewModel {
     func save() async -> Bool {
         error = nil
 
-        // Phase 1 belt-and-suspenders: the editor UI cannot produce these
-        // variants (ScheduleTypeTag / ActionTypeTag do not expose them), but
-        // guard against template imports, future dev paths, or rogue
-        // deserialization reaching save() before Phase 4 turns the feature on.
-        if case .calendar = schedule {
-            self.error = "Calendar schedules are not yet supported"
-            return false
-        }
-        if case .openEventLinks = action {
-            self.error = "Open Event Links action is not yet supported"
-            return false
-        }
-
         // Validation
         if case .cron(let expression) = schedule {
             let expr = expression.trimmingCharacters(in: .whitespaces)
@@ -168,6 +155,14 @@ final class TaskEditorViewModel {
             let formatter = ISO8601DateFormatter()
             if formatter.date(from: runAt) == nil {
                 error = "Invalid date"
+                return false
+            }
+        }
+
+        if case .calendar(let calendarId, _, _) = schedule {
+            let trimmed = calendarId.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                error = "Please select a calendar"
                 return false
             }
         }
@@ -200,10 +195,13 @@ final class TaskEditorViewModel {
             }
         case .settings:
             break
-        // TODO: Phase 4 — validate OpenEventLinks fields here. Phase 1 accepts
-        // it without validation since no UI path produces this action value.
         case .openEventLinks:
-            break
+            if case .calendar = schedule {
+                // OK — OpenEventLinks requires a Calendar schedule, which it has
+            } else {
+                error = "Open Event Links requires a Calendar schedule"
+                return false
+            }
         }
 
         saving = true
