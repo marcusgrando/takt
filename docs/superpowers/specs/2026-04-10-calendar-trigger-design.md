@@ -497,51 +497,84 @@ Manual QA for permission flows (first-time prompt, denial recovery, re-grant), s
 
 ## 10. Migration & Rollout
 
-Each step below must build, pass tests, and ship a coherent (if incomplete) user experience. The critical constraint: Swift has exhaustive switches on `Schedule` and `Action` in `ScheduleBuilderView.swift:10`, `ActionBuilderView.swift:14`, `AutoName.swift:12`, and `TaskItemView.swift:134` (and a few more to discover during implementation). Adding enum variants to the Rust models regenerates the UniFFI-exported Swift enums and immediately breaks every one of those switches. Therefore **any step that touches `Schedule` or `Action` enums must also update every Swift switch in the same commit.**
+Each step below must build, pass tests, and ship a coherent user experience where the calendar feature is either **genuinely off** (no way to produce or observe it) or **fully on**. Half-on states that persist unusable tasks are explicitly forbidden.
 
-1. **Schema, structs, bridge contract, and enum stubs.**
-   - Add migration `002_calendar.sql` (with the full `status`/`trigger_at`/`dispatched_at` schema).
-   - Add `Schedule::Calendar`, `Action::OpenEventLinks`, `CalendarEvent`, `CalendarInfo`, `CalendarAccessStatus`, `TaskHealth` to `libtakt/src/models.rs`.
-   - Add `TaskDto.health` field (populated with `Healthy` for all tasks in this step — no bridge call yet).
-   - Extend `PlatformBridge` trait with the new methods. Provide a macOS implementation that returns stubbed values (`NotDetermined`, empty vec, etc.) — no EventKit wiring yet. This keeps existing `PlatformBridge` consumers compiling.
-   - Add the three new `TaktCore` methods (`get_calendar_access_status`, `request_calendar_access`, `list_calendars`) as thin pass-throughs to the stub bridge.
-   - Regenerate UniFFI bindings.
-   - **Update every Swift switch** on `Schedule`, `Action`, and (new) `TaskHealth`:
-     - `ScheduleBuilderView.swift:10` — add `case .calendar: return .calendar` in the `scheduleType` computed property, add `.calendar` to `ScheduleTypeTag`, render an empty placeholder view for the calendar case ("Coming soon").
-     - `ActionBuilderView.swift:14` — add `case .openEventLinks: return .openEventLinks`, add to `ActionTypeTag`, render a placeholder.
-     - `AutoName.swift:12` and `describeSchedule`/`describeAction` — add minimal strings (`"Calendar event"`, `"Open event links"`).
-     - `TaskItemView.swift:134` (`actionLabel` and `actionColor`) — add a case for `.openEventLinks`.
-     - Any other exhaustive switches surfaced by the compiler.
-   - **User-visible effect**: new schedule/action tabs exist but are placeholders. Everything else works identically.
-   - **Tests**: existing tests must still pass. No new tests yet.
+The critical constraint: adding variants to `Schedule` and `Action` in `libtakt/src/models.rs` regenerates the UniFFI-exported Swift enums **and** breaks exhaustive matches on both sides. The rollout below lists every known call site that must be updated in the same commit as the enum extension.
 
-2. **EventKit adapter + permissions plumbing.**
-   - Implement the stubbed `PlatformBridge` methods against `EKEventStore` in `macos/Takt/TaktCore+Calendar.swift`.
-   - Add `INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription` to Debug/Release build settings of the Takt target.
-   - Populate `TaskDto.health` using the caching rules from §6.4. No calendar tasks exist yet, so health is always `Healthy`, but the code path is exercised.
-   - **User-visible effect**: still no calendar tasks possible, but the app can now query calendars and access state.
-   - **Tests**: Swift manual test plan for the permission prompt.
+### Step 1 — Enum variants, Rust stubs, schema, bridge contract (feature OFF)
 
-3. **`CalendarPoller` + executor signature change + template vars + dedup table plumbing.**
-   - Implement `CalendarPoller`, `ensure_calendar_poller`, `cancel_tokens` extension, startup reconstitute (§5.2.1), executor trait signature change (`Option<&CalendarEvent>`), template substitution, `url_extract` module.
-   - Every existing call site of `ActionExecutor::execute` passes `None`. Existing tasks behave identically.
-   - **User-visible effect**: zero change (no UI to create calendar tasks yet). The engine is ready.
-   - **Tests**: the full §9.1 suite for the poller, template vars, url extraction. Existing tests must still pass.
+**Guiding principle**: after this step, a user running the app cannot produce a `Schedule::Calendar` or `Action::OpenEventLinks` through any UI path. The enums exist purely so subsequent steps can fill them in without churning every file again. If a rogue row somehow exists in the DB (dev, migration from a future build, manual edit), the Rust arms handle it defensively without panic.
 
-4. **`OpenEventLinks` action execution + `CalendarScheduleBuilder` UI + `CalendarBuilder` action form.**
-   - Replace the placeholder views from step 1 with the real `CalendarScheduleBuilder.swift` and the real `OpenEventLinks` action form.
-   - Wire `TaskEditorViewModel` validation and auto-name cases.
-   - Wire task list badges (§7.6) to `task.health`.
-   - **User-visible effect**: users can now create fully functional calendar triggers end-to-end.
-   - **Tests**: manual smoke test of the golden path (create → trigger fires on real event → links open).
+- Add migration `002_calendar.sql` (with the full `status`/`trigger_at`/`dispatched_at` schema).
+- Add `Schedule::Calendar`, `Action::OpenEventLinks`, `CalendarEvent`, `CalendarInfo`, `CalendarAccessStatus`, `TaskHealth` to `libtakt/src/models.rs`.
+- **Update `models.rs` custom deserializers** so the new variants round-trip:
+  - `Action` custom deserialize (`models.rs:235` — `unknown_variant` list and branching): add `"OpenEventLinks"` case that constructs `Action::OpenEventLinks { open_conference: false, open_notes_links: false, browser: None }`.
+  - `Schedule` deserializer: if custom, add the `Calendar` branch; if derive-based, no change needed (verify during implementation).
+- Add `TaskDto.health` field (populated with `Healthy` for all tasks in this step — no bridge call yet).
+- Extend `PlatformBridge` trait with the new methods. Provide a macOS implementation that returns stubbed values (`Err("not_implemented")` is fine) — no EventKit wiring yet. Keeps existing `PlatformBridge` consumers compiling.
+- Add the three new `TaktCore` methods (`get_calendar_access_status`, `request_calendar_access`, `list_calendars`) as thin pass-throughs. They return errors in step 1; UI will not call them yet.
+- **Add defensive no-op arms in every exhaustive Rust match over `Schedule` or `Action`.** Each arm logs a warning and returns early without side effects. The known call sites:
+  - `libtakt/src/scheduler.rs:123` (`catch_up_missed` match on `task.schedule`) — `Schedule::Calendar { .. } => false` (never catches up in step 1).
+  - `libtakt/src/scheduler.rs:170` (`schedule_task` match on `task.schedule`) — `Schedule::Calendar { .. } => { warn!("Schedule::Calendar not yet supported, task {id} will not run"); Ok(()) }`.
+  - `libtakt/src/executor/macos.rs:27` (`execute` match on `action`) — `Action::OpenEventLinks { .. } => Err(ExecutorError::Unsupported("OpenEventLinks not yet supported".into()))`.
+  - Run `cargo build` and address any other exhaustive matches surfaced by the compiler (this list is authoritative at spec time; plan time should re-verify).
+- Regenerate UniFFI bindings.
+- **Swift: hide the feature in the UI, don't just placeholder it.** The regenerated Swift enums force updates to every exhaustive switch, but we must also prevent the user from *producing* the new variants:
+  - `ScheduleTypeTag` enum: **do not add a `.calendar` case in step 1.** Leaving it out means the type selector has no Calendar tab, the `handleTypeChange` switch in `ScheduleBuilderView.swift:299` remains three-cased and compiles, and there is no UI path to write `.calendar` into `schedule`. The Rust `Schedule::Calendar` variant is only reachable via the serde layer, which the UI never constructs.
+  - `ActionTypeTag` enum: same approach — **do not add `.openEventLinks` in step 1.** No button, no `handleTypeChange` case (`ActionBuilderView.swift:661`), no way for the editor to write the variant.
+  - The remaining exhaustive switches (on the Swift enum mirror itself, not on the tag enums) **must** be updated because the compiler forces them:
+    - `ScheduleBuilderView.swift:10` (`scheduleType` computed property matching on `schedule`): add `case .calendar: return .cron` (falls back to an existing tag — the UI will never actually render this because the tag isn't in `allCases`, but it must compile). Include a `// TODO: step 4 — real Calendar tag` comment.
+    - `ActionBuilderView.swift:14` (`actionType` computed): same pattern — `case .openEventLinks: return .openUrl` with the same comment.
+    - `AutoName.swift` `describeAction` and `describeSchedule`: add cases returning `"Calendar event"` / `"Open event links"` so a serde-only task is still nameable in the list.
+    - `TaskItemView.swift:134` (`actionLabel`, `actionColor`): add `.openEventLinks` returning `("event", .teal)` or similar.
+    - Any other exhaustive switches the compiler surfaces.
+  - `TaskEditorViewModel.save()` (`TaskEditorViewModel.swift:198`): add a guard at the top — `if case .calendar = schedule { throw …; }; if case .openEventLinks = action { throw …; }`. The editor UI can't produce these in step 1, but this guard is a belt-and-suspenders defense against hypothetical future paths (template import, etc.) reaching save before step 4.
+  - Badge rendering (§7.6) is **not** added in step 1 — `TaskDto.health` is always `Healthy` for existing tasks, and Calendar tasks can't exist, so no badge code is needed.
+- **User-visible effect**: zero. The app looks and behaves identically. Internally, the enums and schema are in place.
+- **Tests**: all existing tests must still pass. No new tests yet. Add one Rust test that round-trips a `Schedule::Calendar` through serde to catch future regressions in the custom deserializer.
 
-5. **Polish: template variable hints, quick-start template, README section.**
-   - Add the variable hint lines below text fields (§7.4).
-   - Add the "Open meeting links" template to `TemplateGridView`.
-   - Document the feature in the README.
-   - **User-visible effect**: discoverability improvements.
+### Step 2 — EventKit adapter + permissions plumbing (feature OFF)
 
-Steps 1–3 ship a placeholder UI with a complete backend. Step 4 flips the feature on. Step 5 polishes. Each step compiles and ships a coherent app state.
+- Implement the stubbed `PlatformBridge` methods against `EKEventStore` in `macos/Takt/TaktCore+Calendar.swift`.
+- Add `INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription` to Debug/Release build settings of the Takt target.
+- Populate `TaskDto.health` using the caching rules from §6.4. No calendar tasks exist yet, so health is always `Healthy`, but the code path is exercised on every `list_tasks()` call.
+- UI remains unchanged from step 1 — still no way to produce `Schedule::Calendar` / `Action::OpenEventLinks`. The save-time guards from step 1 stay in place.
+- **User-visible effect**: zero. The app can now query calendars and access state internally.
+- **Tests**: Swift manual test plan for the permission prompt (documented but not automated, since EventKit auth isn't mockable). Rust tests for the health-population code path using a mock bridge.
+
+### Step 3 — `CalendarPoller` + executor signature change + template vars (feature OFF)
+
+- Implement `CalendarPoller`, `ensure_calendar_poller`, the `cancel_tokens` extension with `"calendar:{task}:{event}:{start}"` keys, startup reconstitute (§5.2.1), the executor trait signature change (`Option<&CalendarEvent>`), template substitution, and the `url_extract` module.
+- Replace the defensive `warn!` arm in `scheduler.rs:170` for `Schedule::Calendar` with real logic that delegates to `ensure_calendar_poller`.
+- Replace the `ExecutorError::Unsupported` arm for `Action::OpenEventLinks` with the real implementation (§5.5). This will never be reached in step 3 because the UI still can't produce the variant, but the code is ready for step 4 to flip on.
+- Every existing call site of `ActionExecutor::execute` now passes `None` for the event context. Existing Cron/OneShot/DailyFirstUse tasks behave identically.
+- UI still unchanged — save guards still in place.
+- **User-visible effect**: zero. The engine is fully ready.
+- **Tests**: the full §9.1 suite for the poller, template vars, URL extraction, and health population. Existing tests must still pass.
+
+### Step 4 — Turn the feature on (UI + badges)
+
+This is the step that exposes the feature to users. It is atomic: nothing about Calendar is visible before this step; everything is visible after.
+
+- Add `.calendar` to `ScheduleTypeTag` and wire `handleTypeChange(.calendar)` in `ScheduleBuilderView.swift:299` to emit a default `Schedule::Calendar { calendar_id: "", title_contains: None, minutes_before: 5 }`.
+- Add `.openEventLinks` to `ActionTypeTag` and wire `handleTypeChange` in `ActionBuilderView.swift:661` to emit the default `Action::OpenEventLinks { open_conference: true, open_notes_links: true, browser: None }`.
+- Remove the `// TODO: step 4` fallback arms from `scheduleType` / `actionType` computed properties and return the real tag cases.
+- Remove the save-time guards in `TaskEditorViewModel.save()` (the UI can now legitimately produce these variants).
+- Implement the real `CalendarScheduleBuilder.swift` view and the `OpenEventLinks` action form in `ActionBuilderView`.
+- Add validation: saving a `Calendar` schedule requires non-empty `calendar_id`; otherwise toast an error. Non-blocking inline warning if the user picks `OpenEventLinks` without `Calendar` schedule.
+- Implement the health badges in `TaskItemView.swift:134` per §7.6. Replace the minimal `actionLabel`/`actionColor` entries for `.openEventLinks` with the real "event" label and teal color.
+- Implement the real `AutoName` cases (§7.5), replacing the minimal strings from step 1.
+- **User-visible effect**: calendar triggers and event-links actions are now fully usable end-to-end. The first time a user picks `Calendar`, the permission prompt appears.
+- **Tests**: manual smoke test of the golden path — create a task, trigger fires on a real EventKit event, links open in the correct browser.
+
+### Step 5 — Polish: template variable hints, quick-start template, README
+
+- Add the variable hint lines below text fields when `Schedule::Calendar` is active (§7.4).
+- Add the "Open meeting links" template to `TemplateGridView` (§7.8).
+- Document the feature in the README.
+- **User-visible effect**: discoverability improvements.
+
+**Rollout invariant**: at the end of steps 1, 2, and 3, the feature is genuinely off — no UI path constructs the new variants, and both Rust and Swift save-time guards reject them defensively. Step 4 is the single atomic flip. This matches how the existing `DailyFirstUse` feature was shipped: the engine, the persistence, and the UI all landed together, avoiding half-on states where users could persist unusable tasks.
 
 ## 11. Open Questions
 
