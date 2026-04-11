@@ -742,16 +742,7 @@ struct ActionBuilderView: View {
     // MARK: - Type Change
 
     private func handleTypeChange(_ tag: ActionTypeTag) {
-        switch tag {
-        case .openEventLinks:
-            action = .openEventLinks(
-                openConference: true,
-                openNotesLinks: true,
-                browser: nil
-            )
-        default:
-            action = tag.template.defaultAction
-        }
+        action = tag.template.defaultAction
     }
 
     // MARK: - Header Helpers
@@ -816,13 +807,7 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return .notify
         case .webhook: return .webhook
         case .settings: return .settings
-        // TEMPORARY Phase 4 fallback: ActionTemplate.openMeetingLinks does not
-        // exist until Phase 5 Task 2. This arm is never executed because
-        // handleTypeChange below has an explicit `case .openEventLinks` arm
-        // that bypasses `tag.template.defaultAction`. The fallback only
-        // satisfies the exhaustive switch so the build compiles.
-        // Phase 5 replaces this with `return .openMeetingLinks`.
-        case .openEventLinks: return .openUrl
+        case .openEventLinks: return .openMeetingLinks
         }
     }
 }
