@@ -193,9 +193,15 @@ The dispatch routine (spawned task, whether sleeping first or running immediatel
    - If not found → delete the `scheduled` row, log nothing, return.
    - If `!enabled` → delete the `scheduled` row, log a `skipped` execution, return.
    - If the `Schedule::Calendar` fields changed (e.g., user edited `calendar_id` or `title_contains`) → delete the `scheduled` row and return; the next poll tick will re-evaluate.
-3. Transition the dedup row from `scheduled` → `dispatched` (update `status`, set `dispatched_at`).
-4. Call `execute_and_log(task, Some(event))`.
-5. Remove the entry from `cancel_tokens`.
+3. **Re-fetch the event from the platform bridge** using `bridge.fetch_events_in_window(task.calendar_id, lookback, lookahead)` with a tight window around the original `trigger_at`, and find the event whose `id` matches the one stored in the dedup row:
+   - If the event is no longer returned (cancelled, deleted, moved out of window, access revoked): transition the dedup row to `dispatched`, log a `skipped` execution with reason `"event no longer exists"`, return. We do not fall back to the stale snapshot — stale data is a user-visible bug (wrong Zoom link, wrong title in notifications).
+   - If the event is still present but its `start` shifted, and the new `start - minutes_before` is now more than `CALENDAR_POLL_INTERVAL_SECS` in the future: delete the `scheduled` row and return. The next poll tick will create a fresh reservation at the new `trigger_at`.
+   - If the event is still present and the new `start` is close enough to `now`: proceed with the **freshly fetched** `CalendarEvent` (not the snapshot captured at reservation time).
+4. Transition the dedup row from `scheduled` → `dispatched` (update `status`, set `dispatched_at`).
+5. Call `execute_and_log(task, Some(fresh_event))` — always the fresh copy.
+6. Remove the entry from `cancel_tokens`.
+
+**Fire-time data rule**: the `CalendarEvent` captured at reservation time is used **only** as a persistence key (via `event_id` + `event_start` in `calendar_dispatches`). Every actual execution — normal path, immediate catch-up, and restart reconstitute — reads the event fresh from the bridge just before dispatching. This is a single rule across all code paths; there is no snapshot fallback.
 
 ### 5.2 Integration with `AppScheduler`
 
@@ -213,13 +219,12 @@ On `AppScheduler::start()`, after loading all tasks but before starting the poll
 1. Query `calendar_dispatches WHERE status = 'scheduled' AND trigger_at >= now`.
 2. For each row, look up the corresponding task:
    - If the task no longer exists, is disabled, or no longer has `Schedule::Calendar` → delete the row.
-   - Otherwise, the event metadata (title, notes, etc.) is re-fetched at dispatch time via `bridge.fetch_events_in_window` filtered by `event_id` — we do not persist event bodies, only the trigger slot. **However**, persisting full event data across restarts is out of scope; on startup we store only `(task_id, event_id, event_start, trigger_at)` and rely on the bridge re-fetch at dispatch time. If the bridge no longer returns that `event_id` (event was deleted during downtime), the dispatch is skipped and the row is deleted.
-3. For each surviving row, register a `CancellationToken` and spawn a sleep until `trigger_at`, same as §5.1 future-slot path.
-4. Additionally query `calendar_dispatches WHERE status = 'scheduled' AND trigger_at < now` — these are missed reservations (app was down past the trigger time). For each:
-   - If the task's `run_if_missed = true` → spawn the dispatch routine immediately.
+   - Otherwise, register a `CancellationToken` and spawn a sleep until `trigger_at`. **No event data is re-fetched at reconstitute time** — the dispatch routine itself is responsible for re-fetching the event just before executing (§5.1 "Fire-time data rule"). `calendar_dispatches` only persists `(task_id, event_id, event_start, trigger_at)` — never the event body.
+3. Additionally query `calendar_dispatches WHERE status = 'scheduled' AND trigger_at < now` — these are missed reservations (app was down past the trigger time). For each:
+   - If the task's `run_if_missed = true` → spawn the dispatch routine immediately. The routine re-fetches the event per §5.1; if the event is gone, it logs a `skipped` execution.
    - Otherwise → mark row as `dispatched`, log `skipped` in `execution_logs`.
 
-This closes the gap where a restart between reservation and sleep-fire would otherwise cause the event to be lost (the bug flagged in review #1).
+This closes the gap where a restart between reservation and sleep-fire would otherwise cause the event to be lost (the bug flagged in review #1), and it uses the same single fire-time data rule as every other dispatch path (no snapshot vs. re-fetch inconsistency).
 
 ### 5.3 Executor signature change
 
@@ -348,7 +353,7 @@ New file: `macos/Takt/TaktCore+Calendar.swift`.
 
 - The Takt target generates its `Info.plist` at build time via `GENERATE_INFOPLIST_FILE = YES` and `INFOPLIST_KEY_*` build settings (see `macos/Takt.xcodeproj/project.pbxproj:283`, `:327`). There is **no** `Info.plist` file in the source tree.
 - Action: add `INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription` to both the Debug and Release build settings of the `Takt` target, value: `"Takt reads your calendars to trigger automations based on upcoming events. Data stays on your device."`.
-- Permission is requested on demand when the user first selects `Calendar` as schedule type in the editor.
+- **Permission prompt is always user-gated, never automatic.** When the user selects the `Calendar` schedule tab in the editor, `CalendarScheduleBuilder` calls `core.getCalendarAccessStatus()`. If the status is `NotDetermined`, the view renders a visible **"Grant Calendar Access"** button (and no calendar dropdown). Only clicking that button calls `core.requestCalendarAccess()`, which in turn triggers EventKit's native prompt. Selecting the tab alone never shows a prompt. See §7.2 for the full UX.
 
 ### 6.4 New `TaktCore` APIs
 
@@ -447,11 +452,23 @@ Clicking the badge opens the task in the editor (same as the existing edit butto
 
 ### 7.8 Quick-start template
 
-New template in `TemplateGridView`: **"Open meeting links"**.
+New case added to the existing `ActionTemplate` enum in `macos/Takt/TaktApp.swift:81`: **`openMeetingLinks`**, rendered in `TemplateGridView` with label "Open meeting links" and icon `calendar.badge.clock`.
 
-- Schedule: `Calendar` with first available calendar, empty `title_contains`, `minutes_before = 5`.
-- Action: `OpenEventLinks { open_conference: true, open_notes_links: true, browser: None }`.
-- Icon: calendar badge.
+**Resolution strategy.** `ActionTemplate` is a synchronous enum today (`defaultAction`/`defaultSchedule` return pure values — `TaktApp.swift:108, :127`). We do **not** change that architecture. The new template emits:
+
+- `defaultSchedule`: `Schedule::Calendar { calendar_id: "", title_contains: None, minutes_before: 5 }` — deliberately empty `calendar_id`.
+- `defaultAction`: `Action::OpenEventLinks { open_conference: true, open_notes_links: true, browser: None }`.
+
+When the user taps the template, `EditorWindowContent` opens the editor with those defaults. `CalendarScheduleBuilder` (§7.2) handles every downstream case without any new logic:
+
+- **Status `NotDetermined`** → builder shows the "Grant Calendar Access" button. Save is blocked by the existing empty-`calendar_id` validation.
+- **Status `Denied`** → builder shows the yellow banner with the System Settings deep link. Save blocked identically.
+- **Status `Authorized`, non-empty calendar list** → the dropdown renders with the first entry visually highlighted (via an existing default-to-first-item pattern in the dropdown component), but the underlying `schedule.calendar_id` stays `""` until the user explicitly picks. This forces a conscious choice and avoids silently binding to whichever calendar EventKit happened to list first.
+- **Status `Authorized`, empty calendar list** → builder shows the neutral "No calendars found" info text. Save blocked by validation.
+
+`TaskEditorViewModel.save()` (§7.7) already rejects a `Calendar` schedule with empty `calendar_id` and surfaces the error inline. No new validation is needed for the template path — it reuses the editor's existing gate.
+
+This keeps `ActionTemplate` synchronous (no bridge calls, no async `defaultSchedule`) and pushes all the permission/empty-list handling into the single place that already owns it: `CalendarScheduleBuilder`.
 
 ## 8. Error Handling
 
@@ -481,6 +498,10 @@ New template in `TemplateGridView`: **"Open meeting links"**.
   - **Restart reconstitute — past slot**: seed a `scheduled` row with `trigger_at < now`, verify it is dispatched immediately (if `run_if_missed = true`) or marked `dispatched` + skipped logged (if false).
   - **Restart reconstitute — orphan row**: seed a `scheduled` row whose task no longer exists; restart cleans it up without error.
   - Calendar removed from system: bridge returns `Err("calendar_not_found:{id}")`; poller logs, does not dispatch, `list_tasks()` surfaces `TaskHealth::CalendarNotFound`.
+  - **Fire-time re-fetch — event still present, unchanged**: reservation at t=0 captures event E with Zoom link A; at t=trigger, mock bridge returns E with link A; dispatch uses the freshly-fetched E (assert the executor receives the fresh copy, not the snapshot).
+  - **Fire-time re-fetch — event edited**: reservation captures E with link A; mock bridge at dispatch time returns E with link B (title or notes changed); assert the executor receives the version with link B, confirming no stale snapshot fallback.
+  - **Fire-time re-fetch — event cancelled**: reservation captures E; mock bridge at dispatch time no longer returns E by id; assert the dedup row transitions to `dispatched`, an `execution_logs` row with status `skipped` and reason `"event no longer exists"` is written, and no action runs.
+  - **Fire-time re-fetch — event moved forward**: reservation captures E starting at 10:00 (trigger_at 09:55); before dispatch, event is moved to 11:00. Assert the dedup row is deleted (not marked dispatched), no action runs, and the next poll tick creates a fresh reservation for the new trigger_at.
 - `libtakt/tests/task_health.rs` — unit tests for the health population logic in `list_tasks()`:
   - Non-calendar task always `Healthy`.
   - Calendar task with status `Authorized` + calendar present → `Healthy`.
@@ -564,7 +585,7 @@ This is the step that exposes the feature to users. It is atomic: nothing about 
 - Add validation: saving a `Calendar` schedule requires non-empty `calendar_id`; otherwise toast an error. Non-blocking inline warning if the user picks `OpenEventLinks` without `Calendar` schedule.
 - Implement the health badges in `TaskItemView.swift:134` per §7.6. Replace the minimal `actionLabel`/`actionColor` entries for `.openEventLinks` with the real "event" label and teal color.
 - Implement the real `AutoName` cases (§7.5), replacing the minimal strings from step 1.
-- **User-visible effect**: calendar triggers and event-links actions are now fully usable end-to-end. The first time a user picks `Calendar`, the permission prompt appears.
+- **User-visible effect**: calendar triggers and event-links actions are now fully usable end-to-end. The first time a user picks `Calendar`, they see a "Grant Calendar Access" button; clicking it triggers EventKit's native prompt (see §6.3 and §7.2). The app never prompts without an explicit user click.
 - **Tests**: manual smoke test of the golden path — create a task, trigger fires on a real EventKit event, links open in the correct browser.
 
 ### Step 5 — Polish: template variable hints, quick-start template, README
