@@ -86,7 +86,7 @@ impl TaktCore {
         let state = tokio_runtime()
             .spawn(async move {
                 let pool = db::connect().await?;
-                let store = Arc::new(TaskStore::new(pool));
+                let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
                 let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
                     AppScheduler::new(
@@ -422,7 +422,7 @@ impl TaktCore {
         let bridge = self.bridge.clone();
         self.state
             .get_or_try_init(|| async {
-                let store = Arc::new(TaskStore::new(pool));
+                let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
                 let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
                     AppScheduler::new(
