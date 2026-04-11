@@ -46,35 +46,6 @@ final class MacOSPlatformBridge: PlatformBridge, @unchecked Sendable {
         return idleSeconds < Double(idleThresholdSecs)
     }
 
-    // MARK: - Calendar (Phase 1 stubs — real EventKit impls land in Phase 2)
-
-    func getCalendarAccessStatus() throws -> CalendarAccessStatus {
-        throw NSError(domain: "MacOSPlatformBridge", code: -1, userInfo: [NSLocalizedDescriptionKey: "not_implemented"])
-    }
-
-    func requestCalendarAccess() throws -> CalendarAccessStatus {
-        throw NSError(domain: "MacOSPlatformBridge", code: -1, userInfo: [NSLocalizedDescriptionKey: "not_implemented"])
-    }
-
-    func listCalendars() throws -> [CalendarInfo] {
-        throw NSError(domain: "MacOSPlatformBridge", code: -1, userInfo: [NSLocalizedDescriptionKey: "not_implemented"])
-    }
-
-    func fetchEventsInWindow(
-        calendarId: String,
-        lookbackMinutes: UInt32,
-        lookaheadMinutes: UInt32
-    ) throws -> [CalendarEvent] {
-        throw NSError(domain: "MacOSPlatformBridge", code: -1, userInfo: [NSLocalizedDescriptionKey: "not_implemented"])
-    }
-
-    func fetchEventInstance(
-        calendarId: String,
-        eventId: String,
-        eventStart: String
-    ) throws -> CalendarEvent? {
-        throw NSError(domain: "MacOSPlatformBridge", code: -1, userInfo: [NSLocalizedDescriptionKey: "not_implemented"])
-    }
 }
 
 // NSWorkspace lookups — moved from Rust to Swift for correct main-thread access
