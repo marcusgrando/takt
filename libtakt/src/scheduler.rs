@@ -135,6 +135,7 @@ impl AppScheduler {
                     }
                 }
                 Schedule::DailyFirstUse { .. } => false, // has its own logic
+                Schedule::Calendar { .. } => false, // Phase 1 stub: never catches up; real logic lands in Phase 3
             };
 
             if should_catch_up {
@@ -265,6 +266,15 @@ impl AppScheduler {
                     )
                     .await;
                 });
+            }
+            Schedule::Calendar { .. } => {
+                // Phase 1 stub: calendar scheduling lands in Phase 3.
+                // We intentionally do nothing so a rogue Schedule::Calendar row in the DB
+                // (e.g. from a future build) cannot crash startup.
+                eprintln!(
+                    "Warning: Schedule::Calendar is not yet supported (Phase 1 stub); task '{}' will not fire",
+                    task_id
+                );
             }
         }
         Ok(())

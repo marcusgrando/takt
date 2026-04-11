@@ -44,6 +44,7 @@ pub struct TaskDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(tag = "type")]
 pub enum Schedule {
     Cron {
@@ -55,6 +56,11 @@ pub enum Schedule {
     DailyFirstUse {
         #[serde(default = "default_first_use_delay")]
         delay_minutes: u64,
+    },
+    Calendar {
+        calendar_id: String,
+        title_contains: Option<String>,
+        minutes_before: u32,
     },
 }
 
