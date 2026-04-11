@@ -187,6 +187,10 @@ final class TaskEditorViewModel {
             }
         case .settings:
             break
+        // TODO: Phase 4 — validate OpenEventLinks fields here. Phase 1 accepts
+        // it without validation since no UI path produces this action value.
+        case .openEventLinks:
+            break
         }
 
         saving = true

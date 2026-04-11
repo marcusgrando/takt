@@ -140,6 +140,7 @@ struct TaskItemView: View {
         case .openApp: return "app"
         case .webhook: return "webhook"
         case .settings: return "settings"
+        case .openEventLinks: return "event"
         }
     }
 
@@ -152,6 +153,7 @@ struct TaskItemView: View {
         case .openApp: return .cyan
         case .webhook: return .teal
         case .settings: return .gray
+        case .openEventLinks: return .teal
         }
     }
 

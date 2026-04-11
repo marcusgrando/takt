@@ -64,6 +64,9 @@ enum AutoName {
                 .replacingOccurrences(of: ".extension", with: "")
                 .replacingOccurrences(of: "-", with: " ")
             return "Open \(cleaned.isEmpty ? "Settings" : cleaned)"
+
+        case .openEventLinks:
+            return "Open event links"
         }
     }
 
@@ -113,6 +116,9 @@ enum AutoName {
             case .custom:
                 return "Cron \(expression)"
             }
+
+        case .calendar:
+            return "Calendar event"
         }
     }
 

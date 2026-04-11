@@ -11,6 +11,11 @@ struct ScheduleBuilderView: View {
         case .cron: return .cron
         case .oneShot: return .oneShot
         case .dailyFirstUse: return .dailyFirstUse
+        // TODO: Phase 4 — add `.calendar` to ScheduleTypeTag and return it here.
+        // Phase 1 keeps Calendar schedules unreachable from the UI by falling
+        // back to an existing tag. This branch should never execute because
+        // no Phase-1 code path produces a Schedule::Calendar value.
+        case .calendar: return .cron
         }
     }
 
@@ -51,6 +56,11 @@ struct ScheduleBuilderView: View {
                 oneShotContent
             case .dailyFirstUse:
                 dailyFirstUseContent
+            // TODO: Phase 4 — render CalendarScheduleBuilder here. Phase 1
+            // shows the same content as the Cron tab because no UI path
+            // produces a Schedule::Calendar value (the tag is not in allCases).
+            case .calendar:
+                cronContent
             }
         }
         .onAppear {

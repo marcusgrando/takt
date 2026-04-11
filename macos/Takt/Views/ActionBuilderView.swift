@@ -19,6 +19,10 @@ struct ActionBuilderView: View {
         case .notify: return .notify
         case .webhook: return .webhook
         case .settings: return .settings
+        // TODO: Phase 4 — add `.openEventLinks` to ActionTypeTag and return it here.
+        // Phase 1 keeps this action unreachable from the UI by falling back to
+        // `.openUrl`. Never reached in Phase 1 because no UI path produces it.
+        case .openEventLinks: return .openUrl
         }
     }
 
@@ -61,6 +65,11 @@ struct ActionBuilderView: View {
                 webhookFields
             case .settings:
                 settingsFields
+            // TODO: Phase 4 — render the OpenEventLinks form here. Phase 1
+            // renders the OpenUrl fields as a harmless fallback; unreachable
+            // because no UI path produces an Action::OpenEventLinks value.
+            case .openEventLinks:
+                openUrlFields
             }
 
             // Post-shortcuts for file/url/app types
