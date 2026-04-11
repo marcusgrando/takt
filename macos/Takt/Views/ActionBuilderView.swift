@@ -19,10 +19,7 @@ struct ActionBuilderView: View {
         case .notify: return .notify
         case .webhook: return .webhook
         case .settings: return .settings
-        // TODO: Phase 4 — add `.openEventLinks` to ActionTypeTag and return it here.
-        // Phase 1 keeps this action unreachable from the UI by falling back to
-        // `.openUrl`. Never reached in Phase 1 because no UI path produces it.
-        case .openEventLinks: return .openUrl
+        case .openEventLinks: return .openEventLinks
         }
     }
 
@@ -36,7 +33,7 @@ struct ActionBuilderView: View {
                     }
                 }
                 HStack(spacing: 2) {
-                    ForEach(ActionTypeTag.allCases.suffix(3)) { tag in
+                    ForEach(ActionTypeTag.allCases.suffix(4)) { tag in
                         actionTypeButton(tag)
                     }
                 }
@@ -715,7 +712,16 @@ struct ActionBuilderView: View {
     // MARK: - Type Change
 
     private func handleTypeChange(_ tag: ActionTypeTag) {
-        action = tag.template.defaultAction
+        switch tag {
+        case .openEventLinks:
+            action = .openEventLinks(
+                openConference: true,
+                openNotesLinks: true,
+                browser: nil
+            )
+        default:
+            action = tag.template.defaultAction
+        }
     }
 
     // MARK: - Header Helpers
@@ -741,7 +747,7 @@ struct ActionBuilderView: View {
 // MARK: - ActionTypeTag
 
 enum ActionTypeTag: String, CaseIterable, Identifiable {
-    case openUrl, openFile, openApp, runCommand, notify, webhook, settings
+    case openUrl, openFile, openApp, runCommand, notify, webhook, settings, openEventLinks
 
     var id: String { rawValue }
 
@@ -754,6 +760,7 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return "Notify"
         case .webhook: return "Hook"
         case .settings: return "Settings"
+        case .openEventLinks: return "Event Links"
         }
     }
 
@@ -766,6 +773,7 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return "bell"
         case .webhook: return "globe"
         case .settings: return "gearshape"
+        case .openEventLinks: return "calendar.badge.clock"
         }
     }
 
@@ -778,6 +786,13 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return .notify
         case .webhook: return .webhook
         case .settings: return .settings
+        // TEMPORARY Phase 4 fallback: ActionTemplate.openMeetingLinks does not
+        // exist until Phase 5 Task 2. This arm is never executed because
+        // handleTypeChange below has an explicit `case .openEventLinks` arm
+        // that bypasses `tag.template.defaultAction`. The fallback only
+        // satisfies the exhaustive switch so the build compiles.
+        // Phase 5 replaces this with `return .openMeetingLinks`.
+        case .openEventLinks: return .openUrl
         }
     }
 }
