@@ -459,11 +459,15 @@ then pass `stdout_with_trace.as_deref()` into `log_execution`.
 
 - [ ] **Step 4: Update every call site of `execute_and_log`**
 
-Still in `scheduler.rs`, find every caller of `execute_and_log`. Phase 1 identified these:
-- `schedule_task` → `Schedule::Cron` arm (around line 195)
-- `schedule_task` → `Schedule::OneShot` arm (around line 236)
-- `schedule_task` → `Schedule::DailyFirstUse` arm (via `daily_first_use_loop` around line 294+)
-- `catch_up_missed` (around line 150)
+Find every caller of `execute_and_log` — the compiler will catch any missed ones, but this is the authoritative list:
+
+- `libtakt/src/scheduler.rs` → `schedule_task` → `Schedule::Cron` arm (around line 195)
+- `libtakt/src/scheduler.rs` → `schedule_task` → `Schedule::OneShot` arm (around line 236)
+- `libtakt/src/scheduler.rs` → `daily_first_use_loop` (around line 294+) — `DailyFirstUse` delegates here
+- `libtakt/src/scheduler.rs` → `catch_up_missed` (around line 150)
+- `libtakt/src/lib.rs:344` → `run_task_now` — this is the "Run Now" manual trigger exposed to Swift; it also calls `execute_and_log`. **Do not miss it.**
+
+Verify the full list by running `grep -rn 'execute_and_log' libtakt/src/` before editing.
 
 Each call currently looks like:
 
@@ -482,7 +486,7 @@ let _ = execute_and_log(
 ).await;
 ```
 
-Also check `daily_first_use_loop` (line 294+) — it calls `execute_and_log` internally. Add `None` there too.
+For the `run_task_now` call site in `lib.rs`, the pattern is similar but the call already uses `scheduler::execute_and_log(...)` with named bindings — add `None` as the last argument there as well.
 
 - [ ] **Step 5: Run `cargo check` to find any missed call sites**
 
@@ -1181,7 +1185,7 @@ Append to the `impl CalendarPoller` block:
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs)) => {}
             }
-            run_dispatch(
+            run_dispatch_pub(
                 store,
                 executor,
                 bridge,
@@ -1198,10 +1202,12 @@ Append to the `impl CalendarPoller` block:
 
 - [ ] **Step 3: Implement the free-standing `run_dispatch` function (fire-time rule)**
 
+**Critical design constraint**: `run_dispatch` must NOT reimplement the execution pipeline. All execution, notification, `last_run_at`/`next_run_at` updates, and `execution_logs` writes must flow through the existing `scheduler::execute_and_log` (see `libtakt/src/scheduler.rs:420`), which after Task 3 Step 1 accepts an `Option<&CalendarEvent>` as its last argument. The job of `run_dispatch` is: validate the task, re-fetch the event, branch on the delta, and then **delegate** to `execute_and_log`. Anything other than delegation is a bug that will cause calendar tasks to have divergent semantics from Cron/OneShot/DailyFirstUse (missing `last_run_at` updates, inconsistent notification body, etc).
+
 Still in `libtakt/src/calendar.rs`, add at module scope:
 
 ```rust
-async fn run_dispatch(
+pub(crate) async fn run_dispatch_pub(
     store: Arc<TaskStore>,
     executor: Arc<dyn ActionExecutor>,
     bridge: Arc<dyn PlatformBridge>,
@@ -1213,31 +1219,46 @@ async fn run_dispatch(
     let task = match store.get_task(&task_id).await {
         Ok(Some(t)) if t.enabled => t,
         Ok(Some(_)) => {
+            // Disabled between reservation and fire time.
             let _ = store.delete_calendar_dispatch(&task_id, &event_id, &event_start).await;
-            let _ = store.log_execution(&task_id, "skipped", None, None, Some("task disabled before dispatch")).await;
+            let _ = store
+                .log_execution(&task_id, "skipped", None, None, Some("task disabled before dispatch"))
+                .await;
             return;
         }
         _ => {
+            // Task was deleted.
             let _ = store.delete_calendar_dispatch(&task_id, &event_id, &event_start).await;
             return;
         }
     };
 
     let (calendar_id, minutes_before) = match &task.schedule {
-        Schedule::Calendar { calendar_id, minutes_before, .. } => (calendar_id.clone(), *minutes_before),
+        Schedule::Calendar { calendar_id, minutes_before, .. } => {
+            (calendar_id.clone(), *minutes_before)
+        }
         _ => {
-            // Task schedule changed to a non-calendar type; drop reservation.
+            // Schedule was edited to a non-calendar type between reservation and fire.
             let _ = store.delete_calendar_dispatch(&task_id, &event_id, &event_start).await;
             return;
         }
     };
 
-    // 2. Re-fetch the event instance.
-    let fresh = match bridge.fetch_event_instance(calendar_id.clone(), event_id.clone(), event_start.clone()) {
+    // 2. Re-fetch the event instance (recurrence-safe via fetch_event_instance).
+    let fresh = match bridge.fetch_event_instance(
+        calendar_id.clone(),
+        event_id.clone(),
+        event_start.clone(),
+    ) {
         Ok(Some(e)) if e.calendar_id == calendar_id => e,
         Ok(_) => {
-            let _ = store.mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start).await;
-            let _ = store.log_execution(&task.id, "skipped", None, None, Some("event no longer exists")).await;
+            // Event cancelled, deleted, or moved to a different calendar.
+            let _ = store
+                .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
+                .await;
+            let _ = store
+                .log_execution(&task.id, "skipped", None, None, Some("event no longer exists"))
+                .await;
             return;
         }
         Err(e) => {
@@ -1251,7 +1272,9 @@ async fn run_dispatch(
     let fresh_start = match DateTime::parse_from_rfc3339(&fresh.start) {
         Ok(dt) => dt.with_timezone(&Utc),
         Err(_) => {
-            let _ = store.mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start).await;
+            let _ = store
+                .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
+                .await;
             return;
         }
     };
@@ -1268,42 +1291,53 @@ async fn run_dispatch(
     if d > DISPATCH_TOLERANCE_SECS {
         // Small shift forward — sleep the remainder then re-run dispatch with the latest event.
         tokio::time::sleep(std::time::Duration::from_secs(d as u64)).await;
-        Box::pin(run_dispatch(store, executor, bridge, task_id, event_id, event_start)).await;
+        Box::pin(run_dispatch_pub(
+            store, executor, bridge, task_id, event_id, event_start,
+        ))
+        .await;
         return;
     }
 
-    if d < -DISPATCH_TOLERANCE_SECS {
-        // New trigger is in the past.
-        if !task.run_if_missed {
-            let _ = store.mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start).await;
-            let _ = store.log_execution(&task.id, "skipped", None, None, Some("event start moved into the past")).await;
-            return;
-        }
+    if d < -DISPATCH_TOLERANCE_SECS && !task.run_if_missed {
+        // New trigger is in the past and the task does not want catch-up.
+        let _ = store
+            .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
+            .await;
+        let _ = store
+            .log_execution(&task.id, "skipped", None, None, Some("event start moved into the past"))
+            .await;
+        return;
     }
 
-    // Execute now.
-    let _ = store.mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start).await;
-    let result = executor.execute(&task.action, Some(&fresh)).await;
-    let (status, stdout, stderr, err) = match result {
-        Ok(r) => ("success", r.stdout, r.stderr, None),
-        Err(e) => ("failure", None, None, Some(e.to_string())),
-    };
-    let stdout_with_trace = match stdout {
-        Some(s) => Some(format!("Triggered by event: {} @ {}\n{}", fresh.title, fresh.start, s)),
-        None => Some(format!("Triggered by event: {} @ {}", fresh.title, fresh.start)),
-    };
+    // 4. Mark as dispatched BEFORE executing so concurrent poll ticks see us.
     let _ = store
-        .log_execution(&task.id, status, stdout_with_trace.as_deref(), stderr.as_deref(), err.as_deref())
+        .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
         .await;
-    if task.notify_on_run && status == "success" {
-        bridge.send_notification(
-            format!("Takt: {}", task.name),
-            "Calendar trigger fired".to_string(),
-            false,
-        );
-    }
+
+    // 5. Delegate to the shared execution pipeline. This is the only path
+    //    that calls the executor, writes execution_logs, updates last_run_at
+    //    and next_run_at, and fires notify-on-run — matching Cron/OneShot/
+    //    DailyFirstUse semantics exactly. The Option<&CalendarEvent> argument
+    //    (added in Task 3) carries the fresh event so the executor can use it
+    //    for OpenEventLinks and template variable substitution, and so the
+    //    "Triggered by event: ..." traceability line gets prepended to stdout
+    //    inside execute_and_log.
+    let _ = crate::scheduler::execute_and_log(
+        &*executor,
+        &*store,
+        &*bridge,
+        &task.id,
+        &task.name,
+        task.notify_on_run,
+        &task.action,
+        &task.schedule,
+        Some(&fresh),
+    )
+    .await;
 }
 ```
+
+**Note on `execute_and_log` responsibilities**: the existing implementation at `scheduler.rs:420` already handles all of: executor call, notification dispatch, `log_execution`, and `update_last_run` with `next_cron_fire` for Cron schedules. For `Schedule::Calendar`, `next_run_at` is not deterministic at `update_last_run` time — the next trigger depends on what the calendar holds at the next poll tick, so `next_run_at` can be set to `None` (or left stale). The poller itself is responsible for creating the next reservation on its next tick. If any behavior in `execute_and_log` diverges on `Schedule::Calendar`, fix it in `execute_and_log` directly — do NOT duplicate the logic in `run_dispatch_pub`.
 
 - [ ] **Step 4: Run `cargo check`**
 
@@ -1494,9 +1528,9 @@ In `AppScheduler::start` (or wherever `load_all_tasks` runs), call a new helper 
     }
 ```
 
-- [ ] **Step 6: Expose `run_dispatch` as `pub(crate)`**
+- [ ] **Step 6: Verify `run_dispatch_pub` is `pub(crate)`**
 
-In `libtakt/src/calendar.rs`, rename the free `async fn run_dispatch(...)` to `pub(crate) async fn run_dispatch_pub(...)` (or add a `pub(crate)` wrapper).
+`run_dispatch_pub` is already `pub(crate)` from its definition in Task 8 Step 3. Confirm the signature is visible from `scheduler.rs` — if the compiler complains about a missing `pub(crate)`, add it.
 
 - [ ] **Step 7: Call the reconstitute during `start`**
 

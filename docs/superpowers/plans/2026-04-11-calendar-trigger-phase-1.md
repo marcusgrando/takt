@@ -820,7 +820,7 @@ git commit -m "feat(calendar): add TaktCore pass-through methods for calendar br
 
 **Critical**: do NOT add `.calendar` to `ScheduleTypeTag` or `.openEventLinks` to `ActionTypeTag`. Those enums stay three-cased / seven-cased respectively. The switches below are over the UniFFI-exported `Schedule` / `Action` enums, which the compiler now forces us to update — we return a fallback existing tag with a `// TODO: Phase 4` marker so the compiler is happy and no new tab ever appears in the UI.
 
-- [ ] **Step 1: Update `ScheduleBuilderView.swift`**
+- [ ] **Step 1a: Update the `scheduleType` computed property in `ScheduleBuilderView.swift`**
 
 In `macos/Takt/Views/ScheduleBuilderView.swift`, replace the `scheduleType` computed property (lines 9–15):
 
@@ -851,7 +851,42 @@ With:
     }
 ```
 
-- [ ] **Step 2: Update `ActionBuilderView.swift`**
+- [ ] **Step 1b: Update the body switch in `ScheduleBuilderView.swift`**
+
+Still in `macos/Takt/Views/ScheduleBuilderView.swift`, find the second exhaustive switch around line 47 that renders the type-specific sub-content:
+
+```swift
+            // Type-specific content
+            switch schedule {
+            case .cron:
+                cronContent
+            case .oneShot:
+                oneShotContent
+            case .dailyFirstUse:
+                dailyFirstUseContent
+            }
+```
+
+Replace with:
+
+```swift
+            // Type-specific content
+            switch schedule {
+            case .cron:
+                cronContent
+            case .oneShot:
+                oneShotContent
+            case .dailyFirstUse:
+                dailyFirstUseContent
+            // TODO: Phase 4 — render CalendarScheduleBuilder here. Phase 1
+            // shows the same content as the Cron tab because no UI path
+            // produces a Schedule::Calendar value (the tag is not in allCases).
+            case .calendar:
+                cronContent
+            }
+```
+
+- [ ] **Step 2a: Update the `actionType` computed property in `ActionBuilderView.swift`**
 
 In `macos/Takt/Views/ActionBuilderView.swift`, replace the `actionType` computed property (lines 13–23):
 
@@ -887,6 +922,57 @@ With:
         case .openEventLinks: return .openUrl
         }
     }
+```
+
+- [ ] **Step 2b: Update the body switch in `ActionBuilderView.swift`**
+
+Still in `macos/Takt/Views/ActionBuilderView.swift`, find the second exhaustive switch around line 49 that renders the type-specific fields:
+
+```swift
+            // Type-specific fields
+            switch action {
+            case .openFile:
+                openFileFields
+            case .openUrl:
+                openUrlFields
+            case .openApp:
+                openAppFields
+            case .runCommand:
+                runCommandFields
+            case .notify:
+                notifyFields
+            case .webhook:
+                webhookFields
+            case .settings:
+                settingsFields
+            }
+```
+
+Replace with:
+
+```swift
+            // Type-specific fields
+            switch action {
+            case .openFile:
+                openFileFields
+            case .openUrl:
+                openUrlFields
+            case .openApp:
+                openAppFields
+            case .runCommand:
+                runCommandFields
+            case .notify:
+                notifyFields
+            case .webhook:
+                webhookFields
+            case .settings:
+                settingsFields
+            // TODO: Phase 4 — render the OpenEventLinks form here. Phase 1
+            // renders the OpenUrl fields as a harmless fallback; unreachable
+            // because no UI path produces an Action::OpenEventLinks value.
+            case .openEventLinks:
+                openUrlFields
+            }
 ```
 
 - [ ] **Step 3: Update `AutoName.swift` — `describeAction`**
