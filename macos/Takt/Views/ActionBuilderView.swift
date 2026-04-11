@@ -65,11 +65,8 @@ struct ActionBuilderView: View {
                 webhookFields
             case .settings:
                 settingsFields
-            // TODO: Phase 4 — render the OpenEventLinks form here. Phase 1
-            // renders the OpenUrl fields as a harmless fallback; unreachable
-            // because no UI path produces an Action::OpenEventLinks value.
             case .openEventLinks:
-                openUrlFields
+                openEventLinksFields
             }
 
             // Post-shortcuts for file/url/app types
@@ -515,6 +512,56 @@ struct ActionBuilderView: View {
                     }
                 }
                 .labelsHidden()
+            }
+        }
+    }
+
+    // MARK: - OpenEventLinks
+
+    @ViewBuilder
+    private var openEventLinksFields: some View {
+        if case .openEventLinks(let openConference, let openNotesLinks, let browser) = action {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Open video conference link", isOn: Binding(
+                    get: { openConference },
+                    set: { newValue in
+                        action = .openEventLinks(
+                            openConference: newValue,
+                            openNotesLinks: openNotesLinks,
+                            browser: browser
+                        )
+                    }
+                ))
+                Toggle("Open links from event notes", isOn: Binding(
+                    get: { openNotesLinks },
+                    set: { newValue in
+                        action = .openEventLinks(
+                            openConference: openConference,
+                            openNotesLinks: newValue,
+                            browser: browser
+                        )
+                    }
+                ))
+                Picker("Browser", selection: Binding(
+                    get: { browser ?? "__default__" },
+                    set: { newValue in
+                        let b: String? = newValue == "__default__" ? nil : newValue
+                        action = .openEventLinks(
+                            openConference: openConference,
+                            openNotesLinks: openNotesLinks,
+                            browser: b
+                        )
+                    }
+                )) {
+                    Text("Default browser").tag("__default__")
+                    ForEach(browsers, id: \.self) { b in
+                        Text(b).tag(b)
+                    }
+                }
+                Text("Only fires with a Calendar schedule. Run Now will fail without event context.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
     }
