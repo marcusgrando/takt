@@ -18,6 +18,38 @@ pub trait PlatformBridge: Send + Sync {
     /// Returns true when the user is actively present: screen is unlocked
     /// AND there has been HID input (keyboard/mouse) within `idle_threshold_secs`.
     fn is_user_active(&self, idle_threshold_secs: u64) -> bool;
+
+    // ── Calendar methods (Phase 1: stubs; Phase 2: real EventKit impls) ──
+
+    /// Returns the current user permission state for EventKit access.
+    /// Callers MUST use this instead of inferring from `list_calendars()` output.
+    fn get_calendar_access_status(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError>;
+
+    /// Triggers the native permission prompt (user-gated via an explicit button click).
+    /// Returns the resulting status after the prompt closes.
+    fn request_calendar_access(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError>;
+
+    /// Lists calendars the user can select as trigger sources.
+    /// Returns `Err(TaktError::Execution { msg: "calendar_access_denied" })` if access is not granted.
+    /// An empty vec is a legitimate "authorized user with zero calendars" state.
+    fn list_calendars(&self) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError>;
+
+    /// Fetches events in a time window around `now`, used by the poller to
+    /// discover upcoming and recently-past events for reservation and catch-up.
+    fn fetch_events_in_window(
+        &self,
+        calendar_id: String,
+        lookback_minutes: u32,
+        lookahead_minutes: u32,
+    ) -> Result<Vec<crate::models::CalendarEvent>, crate::error::TaktError>;
+
+    /// Recurrence-safe lookup of a specific event occurrence at dispatch time.
+    fn fetch_event_instance(
+        &self,
+        calendar_id: String,
+        event_id: String,
+        event_start: String,
+    ) -> Result<Option<crate::models::CalendarEvent>, crate::error::TaktError>;
 }
 
 // ── Callback Registry ────────────────────────────────────────────────

@@ -17,6 +17,31 @@ mod tests {
         fn is_user_active(&self, _idle_threshold_secs: u64) -> bool {
             true
         }
+        fn get_calendar_access_status(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        }
+        fn request_calendar_access(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        }
+        fn list_calendars(&self) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        }
+        fn fetch_events_in_window(
+            &self,
+            _calendar_id: String,
+            _lookback_minutes: u32,
+            _lookahead_minutes: u32,
+        ) -> Result<Vec<crate::models::CalendarEvent>, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        }
+        fn fetch_event_instance(
+            &self,
+            _calendar_id: String,
+            _event_id: String,
+            _event_start: String,
+        ) -> Result<Option<crate::models::CalendarEvent>, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        }
     }
 
     async fn test_core() -> TaktCore {
