@@ -384,3 +384,77 @@ impl Task {
         })
     }
 }
+
+#[cfg(test)]
+mod phase1_calendar_tests {
+    use super::*;
+
+    #[test]
+    fn schedule_calendar_round_trips_through_serde() {
+        let schedule = Schedule::Calendar {
+            calendar_id: "cal-abc-123".to_string(),
+            title_contains: Some("standup".to_string()),
+            minutes_before: 5,
+        };
+        let json = serde_json::to_string(&schedule).expect("serialize");
+        let parsed: Schedule = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(schedule, parsed);
+    }
+
+    #[test]
+    fn schedule_calendar_title_contains_none_round_trips() {
+        let schedule = Schedule::Calendar {
+            calendar_id: "cal-x".to_string(),
+            title_contains: None,
+            minutes_before: 0,
+        };
+        let json = serde_json::to_string(&schedule).expect("serialize");
+        let parsed: Schedule = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(schedule, parsed);
+    }
+
+    #[test]
+    fn action_open_event_links_round_trips_through_serde() {
+        let action = Action::OpenEventLinks {
+            open_conference: true,
+            open_notes_links: false,
+            browser: Some("Safari".to_string()),
+        };
+        let json = serde_json::to_string(&action).expect("serialize");
+        let parsed: Action = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(action, parsed);
+    }
+
+    #[test]
+    fn action_open_event_links_defaults_when_fields_missing() {
+        // Simulates an older build or a hand-edited JSON with only the type tag.
+        let json = r#"{"type":"OpenEventLinks"}"#;
+        let parsed: Action = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            parsed,
+            Action::OpenEventLinks {
+                open_conference: true,
+                open_notes_links: true,
+                browser: None,
+            }
+        );
+    }
+
+    #[test]
+    fn calendar_event_round_trips_through_serde() {
+        let event = CalendarEvent {
+            id: "evt-1".to_string(),
+            title: "Team standup".to_string(),
+            start: "2026-04-12T09:00:00Z".to_string(),
+            end: "2026-04-12T09:30:00Z".to_string(),
+            notes: Some("Agenda: https://example.com/doc".to_string()),
+            location: None,
+            url: None,
+            conference_url: Some("https://meet.google.com/abc-defg-hij".to_string()),
+            calendar_id: "cal-abc-123".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        let parsed: CalendarEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(event, parsed);
+    }
+}
