@@ -135,6 +135,19 @@ final class TaskEditorViewModel {
     func save() async -> Bool {
         error = nil
 
+        // Phase 1 belt-and-suspenders: the editor UI cannot produce these
+        // variants (ScheduleTypeTag / ActionTypeTag do not expose them), but
+        // guard against template imports, future dev paths, or rogue
+        // deserialization reaching save() before Phase 4 turns the feature on.
+        if case .calendar = schedule {
+            self.error = "Calendar schedules are not yet supported"
+            return false
+        }
+        if case .openEventLinks = action {
+            self.error = "Open Event Links action is not yet supported"
+            return false
+        }
+
         // Validation
         if case .cron(let expression) = schedule {
             let expr = expression.trimmingCharacters(in: .whitespaces)
