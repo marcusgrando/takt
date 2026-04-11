@@ -205,7 +205,7 @@ The dispatch routine (spawned task, whether sleeping first or running immediatel
 5. Call `execute_and_log(task, Some(fresh))` — always the fresh copy.
 6. Remove the entry from `cancel_tokens`.
 
-Constants: `DISPATCH_TOLERANCE_SECS = 2`, `FETCH_INSTANCE_WINDOW_SECS = 21_600` (6 hours on each side — caller passes the window; the bridge honors it).
+Constants: `DISPATCH_TOLERANCE_SECS = 2`. The recurrence-safe lookup window is a fixed ±6 hours hard-coded inside the platform bridge implementation (see §6.2); `fetch_event_instance` does not expose it as a parameter.
 
 Recurring events: EventKit's `eventIdentifier` is shared across occurrences of a recurring event, and `event(withIdentifier:)` only returns the **first** matching occurrence — using that API would mis-identify every non-first occurrence as "cancelled". `fetch_event_instance` sidesteps this by using `predicateForEvents` over `[event_start - 6h, event_start + 6h]` and filtering to results whose `eventIdentifier` matches. Among matches, it returns the one whose `startDate` is closest to the stored `event_start`. This means:
 
