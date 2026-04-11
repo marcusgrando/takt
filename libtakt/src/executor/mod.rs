@@ -20,6 +20,8 @@ pub enum ExecutorError {
     Unsupported(String),
     #[error("Accessibility permission required: {0}")]
     AccessibilityRequired(String),
+    #[error("{0}")]
+    MissingEventContext(String),
 }
 
 #[async_trait::async_trait]
