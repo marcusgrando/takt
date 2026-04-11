@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ScheduleBuilderView: View {
     @Binding var schedule: Schedule
+    var core: TaktCore
 
     @State private var recurring: RecurringState = defaultRecurring
     @State private var oneShotDate = Date()
@@ -56,11 +57,8 @@ struct ScheduleBuilderView: View {
                 oneShotContent
             case .dailyFirstUse:
                 dailyFirstUseContent
-            // TODO: Phase 4 — render CalendarScheduleBuilder here. Phase 1
-            // shows the same content as the Cron tab because no UI path
-            // produces a Schedule::Calendar value (the tag is not in allCases).
             case .calendar:
-                cronContent
+                CalendarScheduleBuilder(schedule: $schedule, core: core)
             }
         }
         .onAppear {
