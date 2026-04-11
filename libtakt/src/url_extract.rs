@@ -52,7 +52,7 @@ pub fn collect_event_urls(
 }
 
 fn trim_trailing_punctuation(s: &str) -> &str {
-    let trimmed = s.trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?'));
+    let trimmed = s.trim_end_matches(['.', ',', ';', ':', '!', '?']);
     trimmed
 }
 
