@@ -12,6 +12,10 @@ pub enum TaktError {
     Validation { msg: String },
     #[error("Not initialized: call start() first")]
     NotInitialized,
+    #[error("calendar access denied")]
+    CalendarAccessDenied,
+    #[error("calendar not found: {id}")]
+    CalendarNotFound { id: String },
 }
 
 impl From<anyhow::Error> for TaktError {

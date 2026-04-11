@@ -130,6 +130,35 @@ impl TaktCore {
             .map_err(|e| TaktError::Database { msg: e.to_string() })?
     }
 
+    // ── Calendar APIs ─────────────────────────────────────────────────
+    // Phase 1: thin pass-throughs to a stub bridge (returns not_implemented).
+    // Phase 2 replaces the bridge with a real EventKit-backed implementation;
+    // these method bodies do not change.
+
+    pub async fn get_calendar_access_status(&self) -> Result<models::CalendarAccessStatus, TaktError> {
+        let bridge = self.bridge.clone();
+        tokio_runtime()
+            .spawn(async move { bridge.get_calendar_access_status() })
+            .await
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
+    }
+
+    pub async fn request_calendar_access(&self) -> Result<models::CalendarAccessStatus, TaktError> {
+        let bridge = self.bridge.clone();
+        tokio_runtime()
+            .spawn(async move { bridge.request_calendar_access() })
+            .await
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
+    }
+
+    pub async fn list_calendars(&self) -> Result<Vec<models::CalendarInfo>, TaktError> {
+        let bridge = self.bridge.clone();
+        tokio_runtime()
+            .spawn(async move { bridge.list_calendars() })
+            .await
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
+    }
+
     pub async fn get_task(&self, id: String) -> Result<Option<TaskDto>, TaktError> {
         let store = self.store()?.clone();
         tokio_runtime()
