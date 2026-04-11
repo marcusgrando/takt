@@ -2,13 +2,13 @@ uniffi::setup_scaffolding!();
 
 pub mod calendar;
 mod db;
-mod error;
-mod executor;
+pub mod error;
+pub mod executor;
 mod launch_agent;
 pub mod models;
 pub mod platform;
 mod scheduler;
-mod store;
+pub mod store;
 pub mod template;
 pub mod url_extract;
 

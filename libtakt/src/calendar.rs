@@ -280,7 +280,7 @@ impl CalendarPoller {
 
 // ── Fire-time dispatch ────────────────────────────────────────────────
 
-pub(crate) async fn run_dispatch_pub(
+pub async fn run_dispatch_pub(
     store: Arc<TaskStore>,
     executor: Arc<dyn ActionExecutor>,
     bridge: Arc<dyn PlatformBridge>,
