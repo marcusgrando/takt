@@ -8,6 +8,7 @@ pub mod models;
 pub mod platform;
 mod scheduler;
 mod store;
+pub mod url_extract;
 
 use std::sync::{Arc, OnceLock};
 
