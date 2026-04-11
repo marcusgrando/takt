@@ -65,8 +65,13 @@ enum AutoName {
                 .replacingOccurrences(of: "-", with: " ")
             return "Open \(cleaned.isEmpty ? "Settings" : cleaned)"
 
-        case .openEventLinks:
-            return "Open event links"
+        case .openEventLinks(let openConference, let openNotesLinks, _):
+            switch (openConference, openNotesLinks) {
+            case (true, true): return "Open meeting links"
+            case (true, false): return "Open video call"
+            case (false, true): return "Open notes links"
+            case (false, false): return "Open (nothing selected)"
+            }
         }
     }
 
@@ -117,8 +122,14 @@ enum AutoName {
                 return "Cron \(expression)"
             }
 
-        case .calendar:
-            return "Calendar event"
+        case .calendar(let calendarId, let titleContains, let minutesBefore):
+            _ = calendarId  // the title lookup would need a calendar list; for now we use the raw presence
+            let suffix = minutesBefore == 0 ? "when event starts" : "\(minutesBefore) min before"
+            if let needle = titleContains, !needle.isEmpty {
+                return "\(suffix) \"\(needle)\""
+            } else {
+                return "Before any calendar event (\(suffix))"
+            }
         }
     }
 
