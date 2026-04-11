@@ -88,6 +88,9 @@ impl ActionExecutor for MacosExecutor {
                     stderr: None,
                 })
             }
+            Action::OpenEventLinks { .. } => Err(ExecutorError::Unsupported(
+                "OpenEventLinks is not yet implemented (Phase 1 stub — lands in Phase 4)".into()
+            )),
             Action::RunCommand {
                 command,
                 args,

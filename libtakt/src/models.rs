@@ -163,6 +163,11 @@ pub enum Action {
     Settings {
         pane_url: String,
     },
+    OpenEventLinks {
+        open_conference: bool,
+        open_notes_links: bool,
+        browser: Option<String>,
+    },
 }
 
 // Custom Serialize/Deserialize for Action to handle backward compatibility
@@ -227,6 +232,14 @@ impl Serialize for Action {
                 map.serialize_entry("pane_url", pane_url)?;
                 map.end()
             }
+            Action::OpenEventLinks { open_conference, open_notes_links, browser } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "OpenEventLinks")?;
+                map.serialize_entry("open_conference", open_conference)?;
+                map.serialize_entry("open_notes_links", open_notes_links)?;
+                map.serialize_entry("browser", browser)?;
+                map.end()
+            }
         }
     }
 }
@@ -284,7 +297,12 @@ impl<'de> Deserialize<'de> for Action {
             "Settings" => Ok(Action::Settings {
                 pane_url: obj.get("pane_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             }),
-            other => Err(de::Error::unknown_variant(other, &["OpenFile", "OpenUrl", "OpenApp", "RunCommand", "Notify", "Webhook", "Settings"])),
+            "OpenEventLinks" => Ok(Action::OpenEventLinks {
+                open_conference: obj.get("open_conference").and_then(|v| v.as_bool()).unwrap_or(true),
+                open_notes_links: obj.get("open_notes_links").and_then(|v| v.as_bool()).unwrap_or(true),
+                browser: obj.get("browser").and_then(|v| v.as_str()).map(String::from),
+            }),
+            other => Err(de::Error::unknown_variant(other, &["OpenFile", "OpenUrl", "OpenApp", "RunCommand", "Notify", "Webhook", "Settings", "OpenEventLinks"])),
         }
     }
 }
