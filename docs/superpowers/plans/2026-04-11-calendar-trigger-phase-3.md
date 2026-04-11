@@ -988,6 +988,14 @@ impl CalendarPoller {
     }
 
     pub async fn run(self: Arc<Self>) {
+        // Immediate first tick so a task loaded at startup can reserve its
+        // upcoming events without waiting up to CALENDAR_POLL_INTERVAL_SECS.
+        // Without this, a trigger that falls within the first poll window
+        // after app launch would be marked `skipped` (when run_if_missed=false)
+        // even though the app was already running.
+        if let Err(e) = self.tick().await {
+            tracing::warn!("calendar poller initial tick error: {}", e);
+        }
         loop {
             tokio::select! {
                 _ = self.stop.cancelled() => break,
@@ -1447,10 +1455,12 @@ In `remove_task` (line 273+ in Phase 1), after cancelling the task-keyed token, 
 
 - [ ] **Step 5: Implement startup reconstitute**
 
-In `AppScheduler::start` (or wherever `load_all_tasks` runs), call a new helper after loading tasks:
+**Integration point**: `TaktCore::start` at `libtakt/src/lib.rs:100-106` calls `scheduler.start()` followed by `scheduler.load_all_tasks()` as two separate calls. The reconstitute logic MUST run after every enabled task has been scheduled, so the canonical integration point is the **tail of `load_all_tasks()` in `scheduler.rs`**, not `AppScheduler::start`. This keeps the call site single and guarantees ordering (tasks → reconstitute) regardless of who invokes the scheduler.
+
+Add a new `pub(crate)` helper on `AppScheduler`:
 
 ```rust
-    pub async fn reconstitute_calendar_dispatches(&self) -> anyhow::Result<()> {
+    pub(crate) async fn reconstitute_calendar_dispatches(&self) -> anyhow::Result<()> {
         let pending = self.store.list_pending_dispatches().await?;
         for p in pending {
             // Validate the task still exists and is a Calendar schedule.
@@ -1532,15 +1542,18 @@ In `AppScheduler::start` (or wherever `load_all_tasks` runs), call a new helper 
 
 `run_dispatch_pub` is already `pub(crate)` from its definition in Task 8 Step 3. Confirm the signature is visible from `scheduler.rs` — if the compiler complains about a missing `pub(crate)`, add it.
 
-- [ ] **Step 7: Call the reconstitute during `start`**
+- [ ] **Step 7: Call `reconstitute_calendar_dispatches` at the end of `load_all_tasks`**
 
-In `AppScheduler::start`, after `load_all_tasks()` succeeds:
+Find `AppScheduler::load_all_tasks` in `scheduler.rs`. After the loop that schedules every enabled task finishes (right before `Ok(())` returns), add:
 
 ```rust
-    if let Err(e) = self.reconstitute_calendar_dispatches().await {
-        eprintln!("Warning: failed to reconstitute calendar dispatches: {}", e);
-    }
+        if let Err(e) = self.reconstitute_calendar_dispatches().await {
+            eprintln!("Warning: failed to reconstitute calendar dispatches: {}", e);
+        }
+        Ok(())
 ```
+
+This runs automatically on every `TaktCore::start` via the existing `scheduler.load_all_tasks()` call at `lib.rs:104`. **Do not** duplicate this into `TaktCore::start`. Do not touch `AppScheduler::start`. The single integration point is at the tail of `load_all_tasks`.
 
 - [ ] **Step 8: Run `cargo check`**
 

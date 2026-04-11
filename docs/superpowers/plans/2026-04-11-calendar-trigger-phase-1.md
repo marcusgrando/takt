@@ -1072,6 +1072,17 @@ Insert this block right after `error = nil` and before `let finalName = ...` (or
         }
 ```
 
+- [ ] **Step 2b: Add exhaustiveness case for the existing action validation switch**
+
+Still in `TaskEditorViewModel.swift`, find the per-action validation switch around line 162 that currently handles all seven variants (`openFile`, `openUrl`, `openApp`, `runCommand`, `notify`, `webhook`, `settings`). Adding `Action::OpenEventLinks` in Task 4 makes this switch non-exhaustive and the Swift compiler will refuse to build. Add a new case before the closing `}` of the switch:
+
+```swift
+        case .openEventLinks:
+            break
+```
+
+The `break` is intentional: the early-return guard in Step 2 already rejects this action before the validation switch runs, so no field-level checks are needed here in Phase 1. Phase 4 Task 6 replaces this `break` with the real validation (`OpenEventLinks` requires a `Calendar` schedule).
+
 - [ ] **Step 3: Build the full app**
 
 Run: `make build`

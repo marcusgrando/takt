@@ -750,9 +750,9 @@ Find the block added in Phase 1 Task 10:
 
 Delete both if-statements.
 
-- [ ] **Step 2: Add real validation**
+- [ ] **Step 2: Add real validation for `Schedule::Calendar`**
 
-In the same file, add validation for `Schedule::Calendar` and for the `OpenEventLinks` + non-Calendar combination. Insert after the existing cron/oneShot validation blocks:
+In the same file, add validation for `Schedule::Calendar`. Insert after the existing cron/oneShot validation blocks (and before the per-action switch at line 162):
 
 ```swift
         if case .calendar(let calendarId, _, _) = schedule {
@@ -762,23 +762,30 @@ In the same file, add validation for `Schedule::Calendar` and for the `OpenEvent
                 return false
             }
         }
+```
 
-        if case .openEventLinks = action {
+- [ ] **Step 3: Replace the Phase 1 `case .openEventLinks: break` with real validation**
+
+Find the per-action validation switch (around line 162, was extended in Phase 1 Task 10 Step 2b with `case .openEventLinks: break`). Replace that case with the real check:
+
+```swift
+        case .openEventLinks:
             if case .calendar = schedule {
-                // OK — OpenEventLinks requires Calendar schedule
+                // OK — OpenEventLinks requires a Calendar schedule, which it has
             } else {
                 error = "Open Event Links requires a Calendar schedule"
                 return false
             }
-        }
 ```
 
-- [ ] **Step 3: Build**
+This is blocking because persisting an `OpenEventLinks` action paired with a non-Calendar schedule would produce `ExecutorError::MissingEventContext` on every execution — strictly worse than a save-time refusal.
+
+- [ ] **Step 4: Build**
 
 Run: `make build`
 Expected: succeeds.
 
-- [ ] **Step 4: Manual save-path tests**
+- [ ] **Step 5: Manual save-path tests**
 
 Open the app. For each of these combinations, attempt to save and verify the behavior:
 
@@ -788,7 +795,7 @@ Open the app. For each of these combinations, attempt to save and verify the beh
 - [ ] Cron + OpenEventLinks → save refused with "Open Event Links requires a Calendar schedule".
 - [ ] Calendar with picked calendar + Notify → saves successfully (OpenEventLinks is not mandatory).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add macos/Takt/ViewModels/TaskEditorViewModel.swift
