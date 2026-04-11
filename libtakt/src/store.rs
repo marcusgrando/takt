@@ -6,6 +6,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// A calendar dispatch row that has status = 'scheduled' and is waiting to fire.
+#[derive(Debug, Clone)]
+pub struct PendingDispatch {
+    pub task_id: String,
+    pub event_id: String,
+    pub event_start: String,
+    pub trigger_at: String,
+}
+
 pub struct TaskStore {
     pool: SqlitePool,
     bridge: Arc<dyn PlatformBridge>,
@@ -237,6 +246,142 @@ impl TaskStore {
         };
         Ok(logs)
     }
+
+    // ── calendar_dispatches helpers ───────────────────────────────────────────
+
+    /// Insert a new dispatch row.  Uses INSERT OR IGNORE so a duplicate
+    /// (task_id, event_id, event_start) triple is silently skipped.
+    pub async fn insert_calendar_dispatch(
+        &self,
+        task_id: &str,
+        event_id: &str,
+        event_start: &str,
+        status: &str,     // "scheduled" | "dispatched"
+        trigger_at: &str, // ISO 8601
+    ) -> anyhow::Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let dispatched_at: Option<&str> = if status == "dispatched" { Some(now.as_str()) } else { None };
+        sqlx::query(
+            "INSERT OR IGNORE INTO calendar_dispatches
+             (task_id, event_id, event_start, status, trigger_at, reserved_at, dispatched_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(task_id)
+        .bind(event_id)
+        .bind(event_start)
+        .bind(status)
+        .bind(trigger_at)
+        .bind(&now)
+        .bind(dispatched_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Flip a row from 'scheduled' to 'dispatched' and record the timestamp.
+    pub async fn mark_calendar_dispatch_dispatched(
+        &self,
+        task_id: &str,
+        event_id: &str,
+        event_start: &str,
+    ) -> anyhow::Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE calendar_dispatches
+             SET status = 'dispatched', dispatched_at = ?
+             WHERE task_id = ? AND event_id = ? AND event_start = ?",
+        )
+        .bind(&now)
+        .bind(task_id)
+        .bind(event_id)
+        .bind(event_start)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a single dispatch row by its composite primary key.
+    pub async fn delete_calendar_dispatch(
+        &self,
+        task_id: &str,
+        event_id: &str,
+        event_start: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "DELETE FROM calendar_dispatches
+             WHERE task_id = ? AND event_id = ? AND event_start = ?",
+        )
+        .bind(task_id)
+        .bind(event_id)
+        .bind(event_start)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Returns `true` when a row exists for the given composite key.
+    pub async fn dispatch_exists(
+        &self,
+        task_id: &str,
+        event_id: &str,
+        event_start: &str,
+    ) -> anyhow::Result<bool> {
+        let row: Option<(i64,)> = sqlx::query_as(
+            "SELECT 1 FROM calendar_dispatches
+             WHERE task_id = ? AND event_id = ? AND event_start = ?
+             LIMIT 1",
+        )
+        .bind(task_id)
+        .bind(event_id)
+        .bind(event_start)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
+    /// Remove every 'scheduled' row that belongs to `task_id`.
+    /// Used when re-syncing a task's upcoming events so stale rows are cleared.
+    pub async fn delete_scheduled_dispatches_for_task(&self, task_id: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            "DELETE FROM calendar_dispatches
+             WHERE task_id = ? AND status = 'scheduled'",
+        )
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete all rows whose `event_start` is more than 24 hours in the past.
+    pub async fn prune_old_calendar_dispatches(&self) -> anyhow::Result<()> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+        sqlx::query("DELETE FROM calendar_dispatches WHERE event_start < ?")
+            .bind(&cutoff)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Return all rows whose status is 'scheduled', in trigger_at order.
+    pub async fn list_pending_dispatches(&self) -> anyhow::Result<Vec<PendingDispatch>> {
+        let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT task_id, event_id, event_start, trigger_at
+             FROM calendar_dispatches
+             WHERE status = 'scheduled'
+             ORDER BY trigger_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(task_id, event_id, event_start, trigger_at)| PendingDispatch {
+                task_id,
+                event_id,
+                event_start,
+                trigger_at,
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -393,6 +538,150 @@ mod tests {
         let logs = store.list_logs(Some(&task.id), 10).await.unwrap();
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "success");
+    }
+
+    // ── calendar_dispatches tests ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_insert_and_dispatch_exists() {
+        let store = test_store().await;
+        let exists = store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap();
+        assert!(!exists, "should not exist before insert");
+
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+
+        let exists = store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap();
+        assert!(exists, "should exist after insert");
+    }
+
+    #[tokio::test]
+    async fn test_insert_or_ignore_is_idempotent() {
+        let store = test_store().await;
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+        // Second insert with same PK should be silently ignored.
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+
+        let pending = store.list_pending_dispatches().await.unwrap();
+        assert_eq!(pending.len(), 1, "INSERT OR IGNORE must not duplicate the row");
+    }
+
+    #[tokio::test]
+    async fn test_mark_dispatched() {
+        let store = test_store().await;
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+
+        // Before marking: should appear in pending list
+        let pending = store.list_pending_dispatches().await.unwrap();
+        assert_eq!(pending.len(), 1);
+
+        store
+            .mark_calendar_dispatch_dispatched("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap();
+
+        // After marking: no longer pending
+        let pending = store.list_pending_dispatches().await.unwrap();
+        assert_eq!(pending.len(), 0, "dispatched row should not appear in pending list");
+    }
+
+    #[tokio::test]
+    async fn test_delete_calendar_dispatch() {
+        let store = test_store().await;
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+        assert!(store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap());
+
+        store.delete_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap();
+        assert!(!store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_delete_scheduled_dispatches_for_task() {
+        let store = test_store().await;
+        // Insert two scheduled rows for task t1 and one dispatched row.
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+        store
+            .insert_calendar_dispatch("t1", "e2", "2026-05-02T10:00:00Z", "scheduled", "2026-05-02T09:55:00Z")
+            .await
+            .unwrap();
+        store
+            .insert_calendar_dispatch("t1", "e3", "2026-05-03T10:00:00Z", "dispatched", "2026-05-03T09:55:00Z")
+            .await
+            .unwrap();
+        // Insert a scheduled row for a different task.
+        store
+            .insert_calendar_dispatch("t2", "e4", "2026-05-01T11:00:00Z", "scheduled", "2026-05-01T10:55:00Z")
+            .await
+            .unwrap();
+
+        store.delete_scheduled_dispatches_for_task("t1").await.unwrap();
+
+        // t1 scheduled rows gone; t1 dispatched row and t2 row still there.
+        assert!(!store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap());
+        assert!(!store.dispatch_exists("t1", "e2", "2026-05-02T10:00:00Z").await.unwrap());
+        assert!(store.dispatch_exists("t1", "e3", "2026-05-03T10:00:00Z").await.unwrap());
+        assert!(store.dispatch_exists("t2", "e4", "2026-05-01T11:00:00Z").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_prune_old_calendar_dispatches() {
+        let store = test_store().await;
+        // An event_start well in the past (should be pruned).
+        store
+            .insert_calendar_dispatch("t1", "e1", "2020-01-01T00:00:00Z", "dispatched", "2020-01-01T00:00:00Z")
+            .await
+            .unwrap();
+        // An event_start in the future (should survive).
+        store
+            .insert_calendar_dispatch("t1", "e2", "2099-01-01T00:00:00Z", "scheduled", "2099-01-01T00:00:00Z")
+            .await
+            .unwrap();
+
+        store.prune_old_calendar_dispatches().await.unwrap();
+
+        assert!(!store.dispatch_exists("t1", "e1", "2020-01-01T00:00:00Z").await.unwrap(), "old row should be pruned");
+        assert!(store.dispatch_exists("t1", "e2", "2099-01-01T00:00:00Z").await.unwrap(), "future row should survive");
+    }
+
+    #[tokio::test]
+    async fn test_list_pending_dispatches_ordering() {
+        let store = test_store().await;
+        store
+            .insert_calendar_dispatch("t1", "e2", "2026-05-02T10:00:00Z", "scheduled", "2026-05-02T09:55:00Z")
+            .await
+            .unwrap();
+        store
+            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .await
+            .unwrap();
+        // A dispatched row — should not appear in the list.
+        store
+            .insert_calendar_dispatch("t1", "e3", "2026-05-03T10:00:00Z", "dispatched", "2026-05-03T09:55:00Z")
+            .await
+            .unwrap();
+
+        let pending = store.list_pending_dispatches().await.unwrap();
+        assert_eq!(pending.len(), 2);
+        // Results should be ordered by trigger_at ascending.
+        assert_eq!(pending[0].event_id, "e1");
+        assert_eq!(pending[1].event_id, "e2");
     }
 }
 
