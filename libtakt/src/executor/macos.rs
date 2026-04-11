@@ -53,7 +53,11 @@ impl ActionExecutor for MacosExecutor {
                 post_shortcuts,
                 shortcut_delay_secs,
             } => {
-                for url in urls {
+                let urls: Vec<String> = urls
+                    .iter()
+                    .map(|u| crate::template::substitute_event_vars(u, event))
+                    .collect();
+                for url in &urls {
                     let url = url.clone();
                     let browser = browser.clone();
                     platform::run_on_main(&*self.bridge, move || {
@@ -160,10 +164,18 @@ impl ActionExecutor for MacosExecutor {
                 command,
                 args,
                 shell,
-            } => run_command(command, args, shell),
+            } => {
+                let command = crate::template::substitute_event_vars(command, event);
+                let args: Vec<String> = args
+                    .iter()
+                    .map(|a| crate::template::substitute_event_vars(a, event))
+                    .collect();
+                run_command(&command, &args, shell)
+            }
             Action::Notify { title, body, sound } => {
-                self.bridge
-                    .send_notification(title.clone(), body.clone(), *sound);
+                let title = crate::template::substitute_event_vars(title, event);
+                let body = crate::template::substitute_event_vars(body, event);
+                self.bridge.send_notification(title, body, *sound);
                 Ok(ExecutionResult {
                     stdout: None,
                     stderr: None,
@@ -174,7 +186,17 @@ impl ActionExecutor for MacosExecutor {
                 method,
                 headers,
                 body,
-            } => send_webhook(url, method, headers, body.as_deref()).await,
+            } => {
+                let url = crate::template::substitute_event_vars(url, event);
+                let body = body
+                    .as_ref()
+                    .map(|b| crate::template::substitute_event_vars(b, event));
+                let headers: std::collections::HashMap<String, String> = headers
+                    .iter()
+                    .map(|(k, v)| (k.clone(), crate::template::substitute_event_vars(v, event)))
+                    .collect();
+                send_webhook(&url, method, &headers, body.as_deref()).await
+            }
         }
     }
 }
