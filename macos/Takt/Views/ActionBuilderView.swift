@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct ActionBuilderView: View {
     @Binding var action: Action
+    var schedule: Schedule       // for template-var hint visibility
     var browsers: [String]
     var fileApps: [String]
     var onFilePathChanged: () -> Void
@@ -21,6 +22,19 @@ struct ActionBuilderView: View {
         case .settings: return .settings
         case .openEventLinks: return .openEventLinks
         }
+    }
+
+    private var isCalendarSchedule: Bool {
+        if case .calendar = schedule { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private var templateVarHint: some View {
+        Text("Use `{{event.title}}`, `{{event.start}}`, `{{event.conference_url}}`, etc.")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .italic()
     }
 
     var body: some View {
@@ -215,6 +229,10 @@ struct ActionBuilderView: View {
                     }
                 }
 
+                if isCalendarSchedule {
+                    templateVarHint
+                }
+
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Text("Browser")
@@ -341,6 +359,10 @@ struct ActionBuilderView: View {
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
                 }
+
+                if isCalendarSchedule {
+                    templateVarHint
+                }
             }
         }
     }
@@ -378,6 +400,10 @@ struct ActionBuilderView: View {
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
+                }
+
+                if isCalendarSchedule {
+                    templateVarHint
                 }
 
                 Toggle("Play sound", isOn: Binding(
@@ -469,6 +495,10 @@ struct ActionBuilderView: View {
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
+                }
+
+                if isCalendarSchedule {
+                    templateVarHint
                 }
             }
         }
