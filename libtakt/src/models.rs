@@ -59,6 +59,7 @@ pub enum Schedule {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Modifier {
     Cmd,
     Shift,
@@ -67,6 +68,7 @@ pub enum Modifier {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct KeyCombo {
     pub modifiers: Vec<Modifier>,
     pub key: String,
@@ -238,6 +240,7 @@ impl<'de> Deserialize<'de> for Action {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Shell {
     Sh,
     Bash,
@@ -247,6 +250,7 @@ pub enum Shell {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 #[allow(clippy::upper_case_acronyms)]
 pub enum HttpMethod {
     GET,

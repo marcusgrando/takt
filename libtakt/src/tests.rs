@@ -14,6 +14,9 @@ mod tests {
         fn run_on_main_sync(&self, callback_id: u64) {
             crate::platform::execute_callback(callback_id);
         }
+        fn is_user_active(&self, _idle_threshold_secs: u64) -> bool {
+            true
+        }
     }
 
     async fn test_core() -> TaktCore {
