@@ -74,6 +74,50 @@ pub struct KeyCombo {
     pub key: String,
 }
 
+// ── Calendar feature: shared types ───────────────────────────────────
+// These types land in Phase 1 as dormant data. They are populated and
+// consumed by Phases 2–4. In Phase 1 nothing writes them.
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum CalendarAccessStatus {
+    NotDetermined,
+    Denied,
+    Authorized,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum TaskHealth {
+    Healthy,
+    CalendarNotFound,
+    CalendarAccessDenied,
+    CalendarAccessNotDetermined,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct CalendarInfo {
+    pub id: String,
+    pub title: String,
+    pub source: String,
+    pub color_hex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct CalendarEvent {
+    pub id: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    pub notes: Option<String>,
+    pub location: Option<String>,
+    pub url: Option<String>,
+    pub conference_url: Option<String>,
+    pub calendar_id: String,
+}
+
 #[derive(Debug, Clone, uniffi::Enum)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Action {
