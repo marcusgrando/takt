@@ -16,6 +16,8 @@
 
 **Rollout invariant for this phase:** the user still sees zero change. No new UI. Calendar tasks cannot be created (the UI does not expose them and the save guards reject them). All new code is dormant from the user's perspective, but fully tested.
 
+**Error-type note (post Phase 1 execution):** `PlatformBridge` calendar methods return `Result<T, crate::error::TaktError>`, not `Result<T, String>`. UniFFI 0.31 `with_foreign` rejects `String` as a throw type. MockBridges in the test sections of this plan use `Result<_, TaktError>` accordingly.
+
 ---
 
 ## Task 1: Add `url_extract` module
@@ -1623,19 +1625,19 @@ impl PlatformBridge for MockBridge {
     fn send_notification(&self, _: String, _: String, _: bool) {}
     fn run_on_main_sync(&self, _: u64) {}
     fn is_user_active(&self, _: u64) -> bool { true }
-    fn get_calendar_access_status(&self) -> Result<CalendarAccessStatus, String> {
+    fn get_calendar_access_status(&self) -> Result<CalendarAccessStatus, crate::error::TaktError> {
         Ok(self.access_status.lock().unwrap().clone())
     }
-    fn request_calendar_access(&self) -> Result<CalendarAccessStatus, String> {
+    fn request_calendar_access(&self) -> Result<CalendarAccessStatus, crate::error::TaktError> {
         Ok(CalendarAccessStatus::Authorized)
     }
-    fn list_calendars(&self) -> Result<Vec<CalendarInfo>, String> {
+    fn list_calendars(&self) -> Result<Vec<CalendarInfo>, crate::error::TaktError> {
         Ok(self.calendars.lock().unwrap().clone())
     }
-    fn fetch_events_in_window(&self, _: String, _: u32, _: u32) -> Result<Vec<CalendarEvent>, String> {
+    fn fetch_events_in_window(&self, _: String, _: u32, _: u32) -> Result<Vec<CalendarEvent>, crate::error::TaktError> {
         Ok(self.events_in_window.lock().unwrap().clone())
     }
-    fn fetch_event_instance(&self, _: String, _: String, _: String) -> Result<Option<CalendarEvent>, String> {
+    fn fetch_event_instance(&self, _: String, _: String, _: String) -> Result<Option<CalendarEvent>, crate::error::TaktError> {
         Ok(self.event_instance.lock().unwrap().clone())
     }
 }

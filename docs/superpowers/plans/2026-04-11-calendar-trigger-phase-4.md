@@ -16,6 +16,8 @@
 
 **Rollout invariant for this phase:** at every commit boundary inside this phase the app must build AND the UI must be self-consistent. Specifically, the `.calendar` / `.openEventLinks` tags are added to the `ScheduleTypeTag` / `ActionTypeTag` enums **only after** the real builders and forms exist. If you add the tag first and the builder second, a checkout in between shows a visible tab/button that renders nothing — a bad halfway state. The task order below is deliberate: implement the real views first, then flip the tags on as the final atomic step.
 
+**Error-type note (post Phase 1 execution):** `TaktCore` calendar methods throw `TaktError` (UniFFI-generated Swift enum), not raw strings. The `do { try await core.getCalendarAccessStatus() } catch { (error as NSError).localizedDescription }` pattern used in this plan still works — UniFFI-generated `TaktError` conforms to Swift `Error` and `NSError` bridging surfaces the thiserror message (e.g. "calendar access denied", "calendar not found: ..."). If you want case-specific branching, switch on the thrown value instead of using `localizedDescription`.
+
 **Ordering**: Tasks 1–5 below are the execution order inside Phase 4. Do not reorder them. Task 1 creates the builder view without exposing it; Task 2 creates the action form without exposing it; Task 3 flips the schedule tag on; Task 4 flips the action tag on; Task 5 adds badges and AutoName; Task 6 removes save guards; Task 7 smoke-tests end-to-end.
 
 ---

@@ -16,6 +16,8 @@
 
 **Rollout invariant for this phase:** the user still sees zero UI change. No Calendar tab, no OpenEventLinks button, no badges. Internally, the bridge now returns real data and `list_tasks` has the health-population code path exercised (even though no task has a Calendar schedule yet).
 
+**Error-type note (post Phase 1 execution):** The `PlatformBridge` calendar methods return `Result<T, crate::error::TaktError>`, not `Result<T, String>`. UniFFI 0.31 `with_foreign` does NOT accept `String` as a throw type — bindgen panics with `unknown throw type: Some(String)`. Phase 1 Task 8 therefore added `TaktError::CalendarAccessDenied` and `TaktError::CalendarNotFound { id }` variants; Swift code throws those directly. Any rare edge case not covered by a variant maps to `TaktError::Execution { msg: "..." }`. The `CalendarBridge { msg: String }` intermediate variant from the Phase 1 plan draft was dropped as redundant.
+
 ---
 
 ## Task 1: Add the `NSCalendarsFullAccessUsageDescription` build setting
@@ -198,7 +200,7 @@ extension MacOSPlatformBridge {
     func listCalendars() throws -> [CalendarInfo] {
         let status = mapAuthorizationStatus(EKEventStore.authorizationStatus(for: .event))
         guard status == .authorized else {
-            throw CalendarBridgeError.accessDenied
+            throw TaktError.CalendarAccessDenied
         }
         let store = CalendarStoreHolder.shared.store
         return store.calendars(for: .event).map { cal in
@@ -218,11 +220,11 @@ extension MacOSPlatformBridge {
     ) throws -> [CalendarEvent] {
         let status = mapAuthorizationStatus(EKEventStore.authorizationStatus(for: .event))
         guard status == .authorized else {
-            throw CalendarBridgeError.accessDenied
+            throw TaktError.CalendarAccessDenied
         }
         let store = CalendarStoreHolder.shared.store
         guard let cal = store.calendar(withIdentifier: calendarId) else {
-            throw CalendarBridgeError.calendarNotFound(calendarId)
+            throw TaktError.CalendarNotFound(id: calendarId)
         }
         let now = Date()
         let start = now.addingTimeInterval(-Double(lookbackMinutes) * 60.0)
@@ -239,14 +241,14 @@ extension MacOSPlatformBridge {
     ) throws -> CalendarEvent? {
         let status = mapAuthorizationStatus(EKEventStore.authorizationStatus(for: .event))
         guard status == .authorized else {
-            throw CalendarBridgeError.accessDenied
+            throw TaktError.CalendarAccessDenied
         }
         guard let anchor = parseIsoDate(eventStart) else {
-            throw CalendarBridgeError.invalidEventStart
+            throw TaktError.Execution(msg: "invalid_event_start")
         }
         let store = CalendarStoreHolder.shared.store
         guard let cal = store.calendar(withIdentifier: calendarId) else {
-            throw CalendarBridgeError.calendarNotFound(calendarId)
+            throw TaktError.CalendarNotFound(id: calendarId)
         }
         // ±6h window around the anchor, then filter by eventIdentifier.
         let windowSeconds: TimeInterval = 6 * 60 * 60
@@ -265,29 +267,15 @@ extension MacOSPlatformBridge {
     }
 }
 
-// MARK: - Error type
+// Note on error propagation:
 //
-// The Rust bridge methods return Result<T, String>. UniFFI-generated Swift
-// protocols expose them as throwing functions whose thrown error's
-// localizedDescription becomes the Rust String. CalendarBridgeError packages
-// the error messages Phase 1 agreed on (calendar_access_denied, etc).
-
-enum CalendarBridgeError: LocalizedError {
-    case accessDenied
-    case calendarNotFound(String)
-    case invalidEventStart
-
-    var errorDescription: String? {
-        switch self {
-        case .accessDenied:
-            return "calendar_access_denied"
-        case .calendarNotFound(let id):
-            return "calendar_not_found:\(id)"
-        case .invalidEventStart:
-            return "invalid_event_start"
-        }
-    }
-}
+// UniFFI 0.31 with_foreign does NOT accept `Result<T, String>` as the throw
+// type (bindgen panics with "unknown throw type: Some(String)"). Phase 1
+// therefore changed the bridge trait to `Result<T, TaktError>`, and UniFFI
+// generates a Swift `TaktError` enum. These EventKit methods throw the
+// relevant `TaktError` case directly — no intermediate Swift error type.
+// The `CalendarAccessDenied` and `CalendarNotFound(id:)` variants were added
+// in Phase 1 Task 8 specifically for this purpose.
 ```
 
 - [ ] **Step 2: Remove the Phase 1 stubs from `TaktCore+Bridge.swift`**
@@ -546,21 +534,21 @@ mod health_tests {
         fn send_notification(&self, _: String, _: String, _: bool) {}
         fn run_on_main_sync(&self, _: u64) {}
         fn is_user_active(&self, _: u64) -> bool { true }
-        fn get_calendar_access_status(&self) -> Result<CalendarAccessStatus, String> {
+        fn get_calendar_access_status(&self) -> Result<CalendarAccessStatus, crate::error::TaktError> {
             self.calls.lock().unwrap().push("get_status");
             Ok(self.status.clone())
         }
-        fn request_calendar_access(&self) -> Result<CalendarAccessStatus, String> {
+        fn request_calendar_access(&self) -> Result<CalendarAccessStatus, crate::error::TaktError> {
             Ok(self.status.clone())
         }
-        fn list_calendars(&self) -> Result<Vec<CalendarInfo>, String> {
+        fn list_calendars(&self) -> Result<Vec<CalendarInfo>, crate::error::TaktError> {
             self.calls.lock().unwrap().push("list_calendars");
             Ok(self.calendars.clone())
         }
-        fn fetch_events_in_window(&self, _: String, _: u32, _: u32) -> Result<Vec<CalendarEvent>, String> {
+        fn fetch_events_in_window(&self, _: String, _: u32, _: u32) -> Result<Vec<CalendarEvent>, crate::error::TaktError> {
             Ok(vec![])
         }
-        fn fetch_event_instance(&self, _: String, _: String, _: String) -> Result<Option<CalendarEvent>, String> {
+        fn fetch_event_instance(&self, _: String, _: String, _: String) -> Result<Option<CalendarEvent>, crate::error::TaktError> {
             Ok(None)
         }
     }
