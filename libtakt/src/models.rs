@@ -41,6 +41,7 @@ pub struct TaskDto {
     pub updated_at: String,
     pub last_run_at: Option<String>,
     pub next_run_at: Option<String>,
+    pub health: TaskHealth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
@@ -379,6 +380,7 @@ impl Task {
             updated_at: self.updated_at.clone(),
             last_run_at: self.last_run_at.clone(),
             next_run_at: self.next_run_at.clone(),
+            health: TaskHealth::Healthy, // Phase 1: always Healthy. Phase 2 populates based on platform bridge.
         })
     }
 }
