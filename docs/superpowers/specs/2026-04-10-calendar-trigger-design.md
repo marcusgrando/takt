@@ -193,7 +193,7 @@ The dispatch routine (spawned task, whether sleeping first or running immediatel
    - If not found → delete the `scheduled` row, log nothing, return.
    - If `!enabled` → delete the `scheduled` row, log a `skipped` execution, return.
    - If the `Schedule::Calendar` fields changed (e.g., user edited `calendar_id` or `title_contains`) → delete the `scheduled` row and return; the next poll tick will re-evaluate.
-3. **Re-fetch the event by ID** using `bridge.fetch_event_by_id(task.calendar_id, event_id)` — a new bridge method (see §6.1) backed by `EKEventStore.event(withIdentifier:)` on macOS, which is a direct lookup that does not depend on any time window. Interpret the result:
+3. **Re-fetch the event instance** using `bridge.fetch_event_instance(task.calendar_id, event_id, event_start)` — a new bridge method (see §6.1) that is **recurrence-safe**. On macOS it issues an `EKEventStore.predicateForEvents` over a 6-hour window centered on the stored `event_start`, filters the results where `eventIdentifier == event_id`, and returns the instance whose `startDate` is closest to the stored `event_start`. This correctly handles both one-time events and any occurrence of a recurring event, even after small reschedules within the window. See §6.2 for the exact Swift implementation. Interpret the result:
    - **`None`** (event cancelled, deleted, or its ID no longer exists): transition the dedup row to `dispatched`, log a `skipped` execution with reason `"event no longer exists"`, return. We do not fall back to the stale snapshot — stale data is a user-visible bug (wrong Zoom link, wrong title in notifications).
    - **`Some(fresh)`** but `fresh.calendar_id != task.calendar_id` (event moved between calendars): treat identically to `None` — same calendar-scope the task asked for no longer contains this event.
    - **`Some(fresh)`**: compute `new_trigger_at = fresh.start - minutes_before` and branch on the delta `d = new_trigger_at - now`:
@@ -205,9 +205,14 @@ The dispatch routine (spawned task, whether sleeping first or running immediatel
 5. Call `execute_and_log(task, Some(fresh))` — always the fresh copy.
 6. Remove the entry from `cancel_tokens`.
 
-Constants: `DISPATCH_TOLERANCE_SECS = 2`.
+Constants: `DISPATCH_TOLERANCE_SECS = 2`, `FETCH_INSTANCE_WINDOW_SECS = 21_600` (6 hours on each side — caller passes the window; the bridge honors it).
 
-Recurring events note: EventKit's `eventIdentifier` is shared across occurrences of a recurring event but the combination `(event_id, event_start)` uniquely identifies an instance. `fetch_event_by_id` with the base identifier returns the first matching occurrence; the dispatch routine additionally verifies that `fresh.start` is within ±1 day of the `event_start` stored in the dedup row. If not, treat as `None` (the identifier now refers to a different instance) — same `skipped` path as a cancelled event.
+Recurring events: EventKit's `eventIdentifier` is shared across occurrences of a recurring event, and `event(withIdentifier:)` only returns the **first** matching occurrence — using that API would mis-identify every non-first occurrence as "cancelled". `fetch_event_instance` sidesteps this by using `predicateForEvents` over `[event_start - 6h, event_start + 6h]` and filtering to results whose `eventIdentifier` matches. Among matches, it returns the one whose `startDate` is closest to the stored `event_start`. This means:
+
+- A weekly standup whose Mar 18 instance was reserved will, on Mar 18 at dispatch time, re-fetch only the Mar 18 occurrence (not Mar 11 or Mar 25), because those are outside the 6-hour window around Mar 18 10:00.
+- An instance rescheduled within the same day (e.g., moved from 10:00 to 11:00) is still found by the predicate, matches by `eventIdentifier`, and is returned with its new `startDate`. Step 3's delta branching then takes over.
+- A recurring instance moved more than 6 hours away (rare) is treated as `None` → `skipped`. This is the documented limitation of v1; the alternative would be to widen the window at the cost of ambiguity with adjacent occurrences.
+- A single non-recurring event is handled identically — the predicate finds it, `eventIdentifier` matches, done.
 
 **Fire-time data rule**: the `CalendarEvent` captured at reservation time is used **only** as a persistence key (via `event_id` + `event_start` in `calendar_dispatches`). Every actual execution — normal path, immediate catch-up, and restart reconstitute — reads the event fresh from the bridge just before dispatching. This is a single rule across all code paths; there is no snapshot fallback.
 
@@ -324,17 +329,18 @@ pub trait PlatformBridge: Send + Sync {
         lookback_minutes: u32,
         lookahead_minutes: u32,
     ) -> Result<Vec<CalendarEvent>, String>;
-    fn fetch_event_by_id(
+    fn fetch_event_instance(
         &self,
         calendar_id: String,
         event_id: String,
+        event_start: String,      // ISO 8601, identifies the specific occurrence
     ) -> Result<Option<CalendarEvent>, String>;
 }
 ```
 
 - `get_calendar_access_status()` is the **only** way callers should determine permission state. `list_calendars()` returning an empty vec MUST NOT be interpreted as "permission denied" — an authorized user may genuinely have zero visible calendars. `list_calendars()` returns `Err("calendar_access_denied")` when called without authorization, not an empty vec.
 - `fetch_events_in_window` replaces the earlier `fetch_upcoming_events` to support retroactive lookup for catch-up (review #3).
-- `fetch_event_by_id` is a direct lookup used by the dispatch routine to get fresh event data at fire time, regardless of how much the event's `start` has shifted since reservation. On macOS it wraps `EKEventStore.event(withIdentifier:)`. Returns `Ok(None)` when the event no longer exists or is no longer visible to the user. Returns `Err("calendar_access_denied")` when authorization is missing. The caller must still verify that `fresh.calendar_id` matches the task's configured calendar (events can be moved between calendars).
+- `fetch_event_instance` is a **recurrence-safe** lookup used by the dispatch routine to get fresh data for a specific occurrence at fire time. On macOS it uses `predicateForEvents` over a 6-hour window centered on `event_start` (not `EKEventStore.event(withIdentifier:)`, which returns only the first occurrence of recurring events and would misidentify every later instance). Returns `Ok(None)` when no matching instance exists in the window. Returns `Err("calendar_access_denied")` when authorization is missing. The caller must still verify that `fresh.calendar_id` matches the task's configured calendar. See §5.1 recurring-events note for the detailed semantics.
 - `request_calendar_access()` returns the resulting status (not a bool), so the caller can distinguish `Authorized` from `Denied` from `NotDetermined` (the latter happens if the user dismisses the prompt without choosing).
 
 Follows the existing synchronous `runOnMainSync` + callback-registry pattern used by `is_user_active` and `send_notification`.
@@ -349,13 +355,17 @@ New file: `macos/Takt/TaktCore+Calendar.swift`.
 - `listCalendars()`:
   - If status != `Authorized`, returns `Err("calendar_access_denied")`.
   - Otherwise returns `store.calendars(for: .event)` mapped to `CalendarInfo { id: calendarIdentifier, title: title, source: source.title, color_hex: cgColor → hex }`. May be an empty vec (user is authorized but has zero visible calendars — legitimate state).
-- `fetchEventById(calendarId, eventId)`:
+- `fetchEventInstance(calendarId, eventId, eventStart)`:
   - If status != `Authorized`, returns `Err("calendar_access_denied")`.
-  - Calls `store.event(withIdentifier: eventId)`:
-    - Returns `nil` → wrap as `Ok(None)`.
-    - Returns an `EKEvent` whose `calendar.calendarIdentifier != calendarId` → `Ok(None)` (event was moved to a different calendar, out of scope for this task).
-    - Otherwise maps to `CalendarEvent` using the same mapping as `fetchEventsInWindow` and returns `Ok(Some(...))`.
-  - No window, no predicate — this is the direct lookup path used by the dispatch routine at fire time.
+  - Parses `eventStart` (ISO 8601) into a `Date`. If parse fails, returns `Err("invalid_event_start")`.
+  - Finds `EKCalendar` by `calendarIdentifier`. If missing, returns `Err("calendar_not_found:{calendarId}")`.
+  - Builds `predicateForEvents(withStart: eventStart - 6h, end: eventStart + 6h, calendars: [cal])` and calls `store.events(matching:)`.
+  - Filters results to those where `ekEvent.eventIdentifier == eventId`:
+    - Zero matches → `Ok(None)`.
+    - One match → map to `CalendarEvent` and return `Ok(Some(...))`.
+    - Multiple matches (can happen only for recurring events with pathologically short recurrence — e.g., hourly within the 6h window) → pick the one whose `startDate` has the smallest absolute delta from `eventStart`, map it, and return `Ok(Some(...))`.
+  - The filter by `eventIdentifier` is critical: `predicateForEvents` on a recurring series returns every occurrence in the window, and the task's reservation is for one specific occurrence identified by `(eventIdentifier, event_start)`. Without the filter, we'd return arbitrary events from the same calendar.
+  - This is the lookup path used by the dispatch routine at fire time. It replaces a naïve `event(withIdentifier:)` call, which would return only the first occurrence of a recurring series and fail for every non-first instance.
 
 - `fetchEventsInWindow(calendarId, lookbackMinutes, lookaheadMinutes)`:
   - If status != `Authorized`, returns `Err("calendar_access_denied")`.
@@ -469,8 +479,8 @@ Clicking the badge opens the task in the editor (same as the existing edit butto
 ### 7.7 `TaskEditorViewModel`
 
 - Lazy-loads the calendar list only when the user selects `Calendar` as schedule type.
-- Validation: saving with `Calendar` schedule requires a non-empty `calendar_id`. Otherwise, toasts an error.
-- If the user picks `OpenEventLinks` but no `Calendar` schedule, shows an inline warning ("This action only runs with a Calendar schedule") — non-blocking; user can still save.
+- Validation: saving with `Calendar` schedule requires a non-empty `calendar_id`. Otherwise, sets `vm.error = "Please select a calendar"` and returns `false` from `save()` — the existing inline-error pattern rendered at `TaskEditorView.swift:115` (red box below the form). No toast system exists in the app, and we do not introduce one.
+- If the user picks `OpenEventLinks` but no `Calendar` schedule, `save()` sets `vm.error = "Open Event Links requires a Calendar schedule"` and returns `false` — same inline-error pattern as the `calendar_id` check. Blocking, because persisting such a task produces a runtime `MissingEventContext` error on every execution, which is strictly worse than a save-time refusal.
 
 ### 7.8 Quick-start template
 
@@ -520,15 +530,18 @@ This keeps `ActionTemplate` synchronous (no bridge calls, no async `defaultSched
   - **Restart reconstitute — past slot**: seed a `scheduled` row with `trigger_at < now`, verify it is dispatched immediately (if `run_if_missed = true`) or marked `dispatched` + skipped logged (if false).
   - **Restart reconstitute — orphan row**: seed a `scheduled` row whose task no longer exists; restart cleans it up without error.
   - Calendar removed from system: bridge returns `Err("calendar_not_found:{id}")`; poller logs, does not dispatch, `list_tasks()` surfaces `TaskHealth::CalendarNotFound`.
-  - **Fire-time re-fetch — event still present, unchanged**: reservation at t=0 captures event E with Zoom link A; at t=trigger, `fetch_event_by_id` returns E with link A; dispatch uses the freshly-fetched E (assert the executor receives the fresh copy, not the snapshot).
-  - **Fire-time re-fetch — event edited in place**: reservation captures E with link A; `fetch_event_by_id` at dispatch time returns E with link B (title or notes changed, same start); assert the executor receives the version with link B.
-  - **Fire-time re-fetch — event cancelled**: reservation captures E; `fetch_event_by_id` returns `Ok(None)` at dispatch time. Assert the dedup row transitions to `dispatched`, an `execution_logs` row with status `skipped` and reason `"event no longer exists"` is written, and no action runs.
-  - **Fire-time re-fetch — event moved to another calendar**: `fetch_event_by_id` returns `Some(fresh)` but `fresh.calendar_id != task.calendar_id`. Treated identically to `Ok(None)` → `skipped`.
+  - **Fire-time re-fetch — event still present, unchanged**: reservation at t=0 captures event E with Zoom link A; at t=trigger, `fetch_event_instance` returns E with link A; dispatch uses the freshly-fetched E (assert the executor receives the fresh copy, not the snapshot).
+  - **Fire-time re-fetch — event edited in place**: reservation captures E with link A; `fetch_event_instance` at dispatch time returns E with link B (title or notes changed, same start); assert the executor receives the version with link B.
+  - **Fire-time re-fetch — event cancelled**: reservation captures E; `fetch_event_instance` returns `Ok(None)` at dispatch time. Assert the dedup row transitions to `dispatched`, an `execution_logs` row with status `skipped` and reason `"event no longer exists"` is written, and no action runs.
+  - **Fire-time re-fetch — event moved to another calendar**: `fetch_event_instance` returns `Some(fresh)` but `fresh.calendar_id != task.calendar_id`. Treated identically to `Ok(None)` → `skipped`.
   - **Fire-time re-fetch — event moved forward by 2 minutes** (`DISPATCH_TOLERANCE_SECS < d <= CALENDAR_POLL_INTERVAL_SECS`): dispatch routine sleeps exactly `d` more seconds (use tokio test-time to verify), re-runs step 3, and then dispatches. The action fires exactly once and at the new trigger time, never earlier.
   - **Fire-time re-fetch — event moved forward past the next poll tick** (`d > CALENDAR_POLL_INTERVAL_SECS`): dedup row is deleted (not `dispatched`), no action runs, and the next poll tick reconstructs a fresh `scheduled` row at the new `trigger_at`.
   - **Fire-time re-fetch — event moved backward, new trigger already in the past**, `run_if_missed = true`: dispatch routine executes immediately with `fresh`. `run_if_missed = false`: dedup row marked `dispatched`, `execution_logs` row with reason `"event start moved into the past"`, no action runs.
   - **Fire-time re-fetch — small jitter within `DISPATCH_TOLERANCE_SECS`**: a delta of 1 second (positive or negative) still dispatches immediately, not a second sleep.
-  - **Recurring event disambiguation**: mock a recurring event where the base `eventIdentifier` now resolves to an occurrence whose `start` is more than ±1 day from the `event_start` stored in the dedup row. Assert the routine treats it as `None` (`skipped`, reason `"event no longer exists"`).
+  - **Recurring event — correct instance picked**: mock a weekly event with three occurrences in the mock's response for the 6-hour window (e.g., the same occurrence split across DST boundary, or a short-recurrence test case). Reservation stored `event_start = T`. `fetch_event_instance` mock returns three matches for the same `eventIdentifier` with `startDate` values `T - 5h`, `T`, `T + 5h`. Assert the routine picks the one at `T` (smallest delta) and dispatches with that data — not `T - 5h` or `T + 5h`.
+  - **Recurring event — instance rescheduled within window**: reservation stored `event_start = 10:00`; the mock returns a single match at `10:30` (same `eventIdentifier`, shifted within the 6h window). Assert step 3 takes the "moved forward by 30 min" branch (sleep-remainder or delete-and-reserve depending on `d`), not the "cancelled" branch.
+  - **Recurring event — instance moved beyond window**: reservation stored `event_start = 10:00`; mock returns zero matches in `[04:00, 16:00]` (instance was moved to 23:00 that day). Assert `Ok(None)` → `skipped` with reason `"event no longer exists"`. Documented v1 limitation.
+  - **Non-recurring event — normal lookup**: reservation stored for a one-time event; mock returns exactly one match with the same `eventIdentifier`; dispatch uses it. (Baseline test to prove the predicate path works for both recurring and non-recurring.)
 - `libtakt/tests/task_health.rs` — unit tests for the health population logic in `list_tasks()`:
   - Non-calendar task always `Healthy`.
   - Calendar task with status `Authorized` + calendar present → `Healthy`.
@@ -620,7 +633,10 @@ This is the step that exposes the feature to users. It is atomic: nothing about 
 - Remove the `// TODO: step 4` fallback arms from `scheduleType` / `actionType` computed properties and return the real tag cases.
 - Remove the save-time guards in `TaskEditorViewModel.save()` (the UI can now legitimately produce these variants).
 - Implement the real `CalendarScheduleBuilder.swift` view and the `OpenEventLinks` action form in `ActionBuilderView`.
-- Add validation: saving a `Calendar` schedule requires non-empty `calendar_id`; otherwise toast an error. Non-blocking inline warning if the user picks `OpenEventLinks` without `Calendar` schedule.
+- Add validation inside `TaskEditorViewModel.save()` using the existing `vm.error` inline pattern (see §7.7). Two blocking checks:
+  - Empty `calendar_id` on a `Calendar` schedule → `self.error = "Please select a calendar"; return false`.
+  - `OpenEventLinks` action combined with a non-`Calendar` schedule → `self.error = "Open Event Links requires a Calendar schedule"; return false`.
+  Both reuse the red box rendered at `TaskEditorView.swift:115`. No new UI components, no toast system, no separate warning state.
 - Implement the health badges in `TaskItemView.swift:134` per §7.6. Replace the minimal `actionLabel`/`actionColor` entries for `.openEventLinks` with the real "event" label and teal color.
 - Implement the real `AutoName` cases (§7.5), replacing the minimal strings from step 1.
 - **User-visible effect**: calendar triggers and event-links actions are now fully usable end-to-end. The first time a user picks `Calendar`, they see a "Grant Calendar Access" button; clicking it triggers EventKit's native prompt (see §6.3 and §7.2). The app never prompts without an explicit user click.
