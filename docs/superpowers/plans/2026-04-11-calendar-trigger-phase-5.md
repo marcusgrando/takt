@@ -167,13 +167,29 @@ Extend `defaultSchedule`:
 
 (The empty `calendarId` is intentional per spec §7.8 — the `CalendarScheduleBuilder` already handles this correctly. Phase 4 Task 6's save validation blocks the save until the user picks a real calendar, giving the inline "Please select a calendar" error.)
 
-- [ ] **Step 4: Update the `ActionBuilderView.handleTypeChange` mapping**
+- [ ] **Step 4: Replace the Phase 4 fallback in `ActionTypeTag.template`**
 
-If Phase 4 Task 2 left an explicit `case .openEventLinks` arm in `handleTypeChange` as a workaround, you can now remove it — `tag.template.defaultAction` will return the right thing via the new `openMeetingLinks` case. Check whether the workaround is still present and clean it up if so.
+Phase 4 Task 4 Step 2 added `case .openEventLinks: return .openUrl` to the `template` accessor in `ActionBuilderView.swift:716` as a compile-only fallback. Replace it now with the real mapping:
 
-Wait — there is no direct mapping from `ActionTypeTag.openEventLinks` to `ActionTemplate.openMeetingLinks` unless the `template` accessor on `ActionTypeTag` is extended. Check the existing pattern for how `ActionTypeTag` maps to `ActionTemplate` and add the new mapping if needed. If the accessor does not exist, leave the Phase 4 workaround in `handleTypeChange` as-is.
+```swift
+        case .openEventLinks: return .openMeetingLinks
+```
 
-- [ ] **Step 5: Build and smoke-test**
+And delete the `// TEMPORARY Phase 4 fallback` comment above the arm.
+
+- [ ] **Step 5: Remove the Phase 4 explicit arm in `handleTypeChange`**
+
+Phase 4 Task 4 Step 5 added an explicit `case .openEventLinks` arm in `handleTypeChange` to avoid relying on `tag.template.defaultAction` while the template mapping was broken. Now that `template` returns `.openMeetingLinks` with the correct `defaultAction`, simplify:
+
+```swift
+    private func handleTypeChange(_ tag: ActionTypeTag) {
+        action = tag.template.defaultAction
+    }
+```
+
+Remove the `switch tag { case .openEventLinks: ... default: ... }` wrapper.
+
+- [ ] **Step 6: Build and smoke-test**
 
 Run: `make build`
 Open the app. In `TemplateGridView`, verify:
@@ -183,7 +199,7 @@ Open the app. In `TemplateGridView`, verify:
 - [ ] The calendar dropdown shows "Select a calendar…" placeholder; saving without picking one shows the inline "Please select a calendar" error.
 - [ ] Picking a calendar and saving creates the task successfully.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add macos/Takt/TaktApp.swift macos/Takt/Views/ActionBuilderView.swift

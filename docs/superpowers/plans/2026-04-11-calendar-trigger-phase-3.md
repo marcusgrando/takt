@@ -427,10 +427,11 @@ Inside the `match action { ... }`, every existing arm ignores `event` — for no
 
 - [ ] **Step 3: Update `execute_and_log` in `scheduler.rs`**
 
-Open `libtakt/src/scheduler.rs`. Find `execute_and_log` (around line 420 per the Phase 1 exploration). Change its signature:
+Open `libtakt/src/scheduler.rs`. Find `execute_and_log` (`pub(crate) async fn execute_and_log` around line 420 per the Phase 1 exploration). The current signature returns `Result<(), String>` (not `Result<(), ()>`) — `run_task_now` at `lib.rs:344` relies on the `String` to propagate a user-readable error into `TaktError::Execution { msg }`. Keep that error type. Add only the trailing `event` parameter:
 
 ```rust
-async fn execute_and_log(
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_and_log(
     executor: &dyn ActionExecutor,
     store: &TaskStore,
     bridge: &dyn PlatformBridge,
@@ -440,7 +441,7 @@ async fn execute_and_log(
     action: &Action,
     schedule: &Schedule,
     event: Option<&CalendarEvent>,
-) -> Result<(), ()>
+) -> Result<(), String>
 ```
 
 Inside the function, change the `executor.execute(action)` call to `executor.execute(action, event)`.

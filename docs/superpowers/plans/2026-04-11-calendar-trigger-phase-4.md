@@ -492,6 +492,8 @@ Expected: one hit.
 
 - [ ] **Step 2: Add the new case with its metadata**
 
+`ActionTypeTag` has **three** exhaustive `switch self` accessors today (`label`, `systemImage`, and `template` around `ActionBuilderView.swift:716`). All three need the new case or the build breaks:
+
 ```swift
 enum ActionTypeTag: String, CaseIterable, Identifiable {
     case openUrl, openFile, openApp, runCommand, notify, webhook, settings, openEventLinks
@@ -521,6 +523,25 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .webhook: return "globe"
         case .settings: return "gearshape"
         case .openEventLinks: return "calendar.badge.clock"
+        }
+    }
+
+    var template: ActionTemplate {
+        switch self {
+        case .openUrl: return .openUrl
+        case .openFile: return .openFile
+        case .openApp: return .openApp
+        case .runCommand: return .runCommand
+        case .notify: return .notify
+        case .webhook: return .webhook
+        case .settings: return .settings
+        // TEMPORARY Phase 4 fallback: ActionTemplate.openMeetingLinks does not
+        // exist until Phase 5 Task 2. This arm is never executed because
+        // handleTypeChange below has an explicit `case .openEventLinks` arm
+        // that bypasses `tag.template.defaultAction`. The fallback only
+        // satisfies the exhaustive switch so the build compiles.
+        // Phase 5 replaces this with `return .openMeetingLinks`.
+        case .openEventLinks: return .openUrl
         }
     }
 }
