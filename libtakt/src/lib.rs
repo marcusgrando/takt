@@ -381,6 +381,7 @@ impl TaktCore {
                     task.notify_on_run,
                     &task.action,
                     &task.schedule,
+                    None,
                 )
                 .await
                 .map_err(|msg| TaktError::Execution { msg })

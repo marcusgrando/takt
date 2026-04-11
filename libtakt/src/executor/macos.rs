@@ -23,7 +23,11 @@ impl MacosExecutor {
 
 #[async_trait]
 impl ActionExecutor for MacosExecutor {
-    async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError> {
+    async fn execute(
+        &self,
+        action: &Action,
+        _event: Option<&crate::models::CalendarEvent>,
+    ) -> Result<ExecutionResult, ExecutorError> {
         match action {
             Action::OpenFile {
                 path,

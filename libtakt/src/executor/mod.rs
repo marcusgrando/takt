@@ -1,4 +1,4 @@
-use crate::models::Action;
+use crate::models::{Action, CalendarEvent};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -24,7 +24,11 @@ pub enum ExecutorError {
 
 #[async_trait::async_trait]
 pub trait ActionExecutor: Send + Sync {
-    async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError>;
+    async fn execute(
+        &self,
+        action: &Action,
+        event: Option<&CalendarEvent>,
+    ) -> Result<ExecutionResult, ExecutorError>;
 }
 
 #[cfg(target_os = "macos")]

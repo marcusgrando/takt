@@ -1,5 +1,5 @@
 use crate::executor::ActionExecutor;
-use crate::models::{Action, Schedule, TaskDto};
+use crate::models::{Action, CalendarEvent, Schedule, TaskDto};
 use crate::platform::PlatformBridge;
 use crate::store::TaskStore;
 use chrono::{DateTime, Local};
@@ -150,7 +150,7 @@ impl AppScheduler {
                 tokio::spawn(async move {
                     let _ = execute_and_log(
                         &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
-                        &schedule,
+                        &schedule, None,
                     )
                     .await;
                 });
@@ -195,7 +195,7 @@ impl AppScheduler {
                         }
                         let _ = execute_and_log(
                             &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
-                            &schedule,
+                            &schedule, None,
                         )
                         .await;
                     })
@@ -236,7 +236,7 @@ impl AppScheduler {
                         }
                         let _ = execute_and_log(
                             &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
-                            &schedule,
+                            &schedule, None,
                         )
                         .await;
                         tokens.lock().await.remove(&task_id);
@@ -383,6 +383,7 @@ async fn daily_first_use_loop(
                 }
                 let _ = execute_and_log(
                     &*executor, &store, &*bridge, &task_id, &task_name, notify, &action, &schedule,
+                    None,
                 )
                 .await;
                 break;
@@ -436,8 +437,9 @@ pub(crate) async fn execute_and_log(
     notify: bool,
     action: &Action,
     schedule: &Schedule,
+    event: Option<&CalendarEvent>,
 ) -> Result<(), String> {
-    let result = executor.execute(action).await;
+    let result = executor.execute(action, event).await;
     let (status, stdout, stderr, error) = match &result {
         Ok(r) => ("success", r.stdout.clone(), r.stderr.clone(), None),
         Err(e) => ("failure", None, None, Some(e.to_string())),
@@ -445,8 +447,13 @@ pub(crate) async fn execute_and_log(
     if notify {
         send_run_notification(bridge, task_name, status == "success");
     }
+    let stdout_with_trace = match (event, stdout.as_ref()) {
+        (Some(e), Some(s)) => Some(format!("Triggered by event: {} @ {}\n{}", e.title, e.start, s)),
+        (Some(e), None) => Some(format!("Triggered by event: {} @ {}", e.title, e.start)),
+        (None, s) => s.cloned(),
+    };
     let _ = store
-        .log_execution(task_id, status, stdout, stderr, error.clone())
+        .log_execution(task_id, status, stdout_with_trace, stderr, error.clone())
         .await;
     let next_run = match schedule {
         Schedule::Cron { expression } => next_cron_fire(expression),
