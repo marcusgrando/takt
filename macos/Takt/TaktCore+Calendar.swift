@@ -1,5 +1,6 @@
-import Foundation
+import AppKit
 import EventKit
+import Foundation
 
 // Extension that implements the calendar-related PlatformBridge methods.
 // Separated from TaktCore+Bridge.swift so EventKit imports stay scoped.
@@ -116,10 +117,25 @@ extension MacOSPlatformBridge {
         let semaphore = DispatchSemaphore(value: 0)
         let store = CalendarStoreHolder.shared.store
         DispatchQueue.main.async {
+            // Temporarily activate the app so macOS shows the permission dialog.
+            // Menu bar apps (.accessory policy) don't get system prompts unless
+            // they become the active application first.
+            let prevPolicy = NSApp.activationPolicy()
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+
+            let finish = {
+                semaphore.signal()
+                // Restore accessory mode after the dialog closes.
+                DispatchQueue.main.async {
+                    NSApp.setActivationPolicy(prevPolicy)
+                }
+            }
+
             if #available(macOS 14.0, *) {
-                store.requestFullAccessToEvents { _, _ in semaphore.signal() }
+                store.requestFullAccessToEvents { _, _ in finish() }
             } else {
-                store.requestAccess(to: .event) { _, _ in semaphore.signal() }
+                store.requestAccess(to: .event) { _, _ in finish() }
             }
         }
         semaphore.wait()
