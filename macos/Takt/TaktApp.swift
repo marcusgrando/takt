@@ -8,26 +8,10 @@ struct TaktApp: App {
 
     var body: some Scene {
         MenuBarExtra("Takt", image: "MenuBarIcon") {
-            if let vm = appDelegate.vm {
-                TaskListView(vm: vm, openEditor: { params in
-                    appDelegate.editorParams = params
-                    appDelegate.captureAppToReactivate()
-                    appDelegate.dismissPopover()
-                    NSApp.setActivationPolicy(.regular)
-                    openWindow(id: "editor")
-                    NSApp.activate(ignoringOtherApps: true)
-                })
-            } else {
-                ProgressView("Starting...")
-                    .frame(width: 280, height: 400)
-            }
+            MenuBarContent(appDelegate: appDelegate, openWindow: openWindow)
         }
         .menuBarExtraStyle(.window)
 
-        // Editor window — uses id-only Window since Window(for:) has SDK compat issues.
-        // Params are stored on AppDelegate before calling openWindow(id:).
-        // .id(editorParams) forces SwiftUI to destroy and recreate EditorWindowContent
-        // when params change, ensuring a fresh ViewModel for each edit/new task.
         Window("", id: "editor") {
             if let core = appDelegate.core, let params = appDelegate.editorParams {
                 EditorWindowContent(
@@ -40,6 +24,30 @@ struct TaktApp: App {
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 500, height: 600)
+    }
+}
+
+/// Separate View so SwiftUI can properly track @Observable access on AppDelegate.
+/// MenuBarExtra inline closures may not set up observation tracking reliably
+/// when launched via LaunchServices.
+private struct MenuBarContent: View {
+    @Bindable var appDelegate: AppDelegate
+    let openWindow: OpenWindowAction
+
+    var body: some View {
+        if let vm = appDelegate.vm {
+            TaskListView(vm: vm, openEditor: { params in
+                appDelegate.editorParams = params
+                appDelegate.captureAppToReactivate()
+                appDelegate.dismissPopover()
+                NSApp.setActivationPolicy(.regular)
+                openWindow(id: "editor")
+                NSApp.activate(ignoringOtherApps: true)
+            })
+        } else {
+            ProgressView("Starting...")
+                .frame(width: 280, height: 400)
+        }
     }
 }
 
