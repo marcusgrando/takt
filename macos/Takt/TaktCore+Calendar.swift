@@ -63,6 +63,25 @@ private func detectConferenceUrl(notes: String?, location: String?) -> String? {
     return nil
 }
 
+/// Returns true if user accepted or tentatively accepted the event.
+/// Personal events (no attendees) always pass. If current user is not
+/// found among attendees (e.g. they are the organizer), event passes.
+/// Only rejects when current user is explicitly pending, declined, or unknown.
+private func isEventAcceptedOrMaybe(_ ek: EKEvent) -> Bool {
+    guard let attendees = ek.attendees, !attendees.isEmpty else {
+        return true // personal event, no attendees
+    }
+    guard let me = attendees.first(where: { $0.isCurrentUser }) else {
+        return true // user not in attendee list (organizer-only, etc.)
+    }
+    switch me.participantStatus {
+    case .accepted, .tentative:
+        return true
+    default:
+        return false
+    }
+}
+
 private func mapEvent(_ ek: EKEvent, calendarId: String) -> CalendarEvent {
     let conferenceUrl = detectConferenceUrl(notes: ek.notes, location: ek.location)
     return CalendarEvent(
@@ -181,6 +200,7 @@ extension MacOSPlatformBridge {
             let end = now.addingTimeInterval(Double(lookaheadMinutes) * 60.0)
             let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [cal])
             let events = store.events(matching: predicate)
+                .filter { isEventAcceptedOrMaybe($0) }
             return events.map { mapEvent($0, calendarId: calendarId) }
         }
     }
@@ -209,7 +229,9 @@ extension MacOSPlatformBridge {
                 end: anchor.addingTimeInterval(windowSeconds),
                 calendars: [cal]
             )
-            let matches = store.events(matching: predicate).filter { $0.eventIdentifier == eventId }
+            let matches = store.events(matching: predicate).filter {
+                $0.eventIdentifier == eventId && isEventAcceptedOrMaybe($0)
+            }
             guard !matches.isEmpty else { return nil }
             let best = matches.min { a, b in
                 abs(a.startDate.timeIntervalSince(anchor)) < abs(b.startDate.timeIntervalSince(anchor))
