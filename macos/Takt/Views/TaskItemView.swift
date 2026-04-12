@@ -68,22 +68,24 @@ struct TaskItemView: View {
                 Spacer()
 
                 HStack(spacing: 10) {
-                    Button {
-                        Task { await handleRun() }
-                    } label: {
-                        if isRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(width: 14, height: 14)
-                        } else {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.primary.opacity(0.8))
+                    if canRunManually {
+                        Button {
+                            Task { await handleRun() }
+                        } label: {
+                            if isRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 14, height: 14)
+                            } else {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.primary.opacity(0.8))
+                            }
                         }
+                        .buttonStyle(.borderless)
+                        .disabled(isRunning)
+                        .help("Run now")
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(isRunning)
-                    .help("Run now")
 
                     Button {
                         openEditor(EditorParams(taskId: task.id, template: nil))
@@ -150,6 +152,14 @@ struct TaskItemView: View {
     }
 
     // MARK: - Helpers
+
+    /// Actions that require calendar event context cannot be triggered manually.
+    private var canRunManually: Bool {
+        switch task.action {
+        case .openEventLinks: return false
+        default: return true
+        }
+    }
 
     private var actionLabel: String {
         switch task.action {
