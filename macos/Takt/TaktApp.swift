@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UserNotifications
 
@@ -140,11 +141,10 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
     }
 }
 
-@Observable
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    var vm: TaskListViewModel?
-    var core: TaktCore?
-    var editorParams: EditorParams?
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    @Published var vm: TaskListViewModel?
+    @Published var core: TaktCore?
+    @Published var editorParams: EditorParams?
     private var appToReactivate: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
