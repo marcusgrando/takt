@@ -29,10 +29,20 @@ struct CalendarScheduleBuilder: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Takt needs access to your calendars to trigger tasks from events.")
                 .font(.system(size: 13))
-            Button("Grant Calendar Access") {
-                Task { await requestAccess() }
+            HStack(spacing: 12) {
+                Button("Grant Calendar Access") {
+                    Task { await requestAccess() }
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Open System Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             }
-            .buttonStyle(.borderedProminent)
+            Text("If the dialog doesn't appear, use System Settings to grant access, then reopen this editor.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
     }
 
