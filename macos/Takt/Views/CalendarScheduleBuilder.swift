@@ -1,3 +1,4 @@
+import EventKit
 import SwiftUI
 
 struct CalendarScheduleBuilder: View {
@@ -29,20 +30,10 @@ struct CalendarScheduleBuilder: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Takt needs access to your calendars to trigger tasks from events.")
                 .font(.system(size: 13))
-            HStack(spacing: 12) {
-                Button("Grant Calendar Access") {
-                    Task { await requestAccess() }
-                }
-                .buttonStyle(.borderedProminent)
-                Button("Open System Settings") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
+            Button("Grant Calendar Access") {
+                Task { await requestAccess() }
             }
-            Text("If the dialog doesn't appear, use System Settings to grant access, then reopen this editor.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -170,14 +161,22 @@ struct CalendarScheduleBuilder: View {
     }
 
     private func requestAccess() async {
-        do {
-            let status = try await core.requestCalendarAccess()
-            self.accessStatus = status
-            if status == .authorized {
-                await loadCalendars()
-            }
-        } catch {
-            self.loadError = (error as NSError).localizedDescription
+        // Call EventKit directly from the UI layer — no Rust round-trip.
+        // The bridge method (requestCalendarAccess) goes Swift → UniFFI → Rust →
+        // tokio → FFI back to Swift → DispatchQueue.main, which doesn't reliably
+        // show the system permission dialog when launched via LaunchServices.
+        // Calling EKEventStore directly on main (where SwiftUI views run) works.
+        let store = EKEventStore()
+        let granted: Bool
+        if #available(macOS 14.0, *) {
+            granted = (try? await store.requestFullAccessToEvents()) ?? false
+        } else {
+            granted = (try? await store.requestAccess(to: .event)) ?? false
+        }
+        let status: CalendarAccessStatus = granted ? .authorized : .denied
+        self.accessStatus = status
+        if status == .authorized {
+            await loadCalendars()
         }
     }
 
