@@ -1,4 +1,4 @@
-use crate::models::Action;
+use crate::models::{Action, CalendarEvent};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -20,11 +20,17 @@ pub enum ExecutorError {
     Unsupported(String),
     #[error("Accessibility permission required: {0}")]
     AccessibilityRequired(String),
+    #[error("{0}")]
+    MissingEventContext(String),
 }
 
 #[async_trait::async_trait]
 pub trait ActionExecutor: Send + Sync {
-    async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError>;
+    async fn execute(
+        &self,
+        action: &Action,
+        event: Option<&CalendarEvent>,
+    ) -> Result<ExecutionResult, ExecutorError>;
 }
 
 #[cfg(target_os = "macos")]

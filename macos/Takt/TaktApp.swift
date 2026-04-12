@@ -79,7 +79,7 @@ struct EditorParams: Codable, Hashable {
 }
 
 enum ActionTemplate: String, Codable, Hashable, CaseIterable {
-    case openUrl, openFile, openApp, runCommand, notify, webhook, settings
+    case openUrl, openFile, openApp, runCommand, notify, webhook, settings, openMeetingLinks
 
     var label: String {
         switch self {
@@ -90,6 +90,7 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
         case .notify: return "Reminder"
         case .webhook: return "Webhook"
         case .settings: return "Settings"
+        case .openMeetingLinks: return "Open Meeting Links"
         }
     }
 
@@ -102,6 +103,7 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
         case .notify: return "bell"
         case .webhook: return "globe"
         case .settings: return "gearshape"
+        case .openMeetingLinks: return "calendar.badge.clock"
         }
     }
 
@@ -121,6 +123,8 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
             return .webhook(url: "", method: .get, headers: [:], body: nil)
         case .settings:
             return .settings(paneUrl: "x-apple.systempreferences:com.apple.settings.General")
+        case .openMeetingLinks:
+            return .openEventLinks(openConference: true, openNotesLinks: true, browser: nil)
         }
     }
 
@@ -128,6 +132,8 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
         switch self {
         case .runCommand, .webhook:
             return .cron(expression: "0 * * * *")
+        case .openMeetingLinks:
+            return .calendar(calendarId: "", titleContains: nil, minutesBefore: 5)
         default:
             return .cron(expression: "0 9 * * *")
         }

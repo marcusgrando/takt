@@ -159,6 +159,14 @@ final class TaskEditorViewModel {
             }
         }
 
+        if case .calendar(let calendarId, _, _) = schedule {
+            let trimmed = calendarId.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                error = "Please select a calendar"
+                return false
+            }
+        }
+
         switch action {
         case .openFile(let path, _, _, _):
             if path.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -187,6 +195,13 @@ final class TaskEditorViewModel {
             }
         case .settings:
             break
+        case .openEventLinks:
+            if case .calendar = schedule {
+                // OK — OpenEventLinks requires a Calendar schedule, which it has
+            } else {
+                error = "Open Event Links requires a Calendar schedule"
+                return false
+            }
         }
 
         saving = true

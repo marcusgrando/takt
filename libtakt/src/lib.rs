@@ -1,13 +1,16 @@
 uniffi::setup_scaffolding!();
 
+pub mod calendar;
 mod db;
-mod error;
-mod executor;
+pub mod error;
+pub mod executor;
 mod launch_agent;
 pub mod models;
 pub mod platform;
 mod scheduler;
-mod store;
+pub mod store;
+pub mod template;
+pub mod url_extract;
 
 use std::sync::{Arc, OnceLock};
 
@@ -86,7 +89,7 @@ impl TaktCore {
         let state = tokio_runtime()
             .spawn(async move {
                 let pool = db::connect().await?;
-                let store = Arc::new(TaskStore::new(pool));
+                let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
                 let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
                     AppScheduler::new(
@@ -126,6 +129,35 @@ impl TaktCore {
         let store = self.store()?.clone();
         tokio_runtime()
             .spawn(async move { Ok(store.list_tasks().await?) })
+            .await
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
+    }
+
+    // ── Calendar APIs ─────────────────────────────────────────────────
+    // Phase 1: thin pass-throughs to a stub bridge (returns not_implemented).
+    // Phase 2 replaces the bridge with a real EventKit-backed implementation;
+    // these method bodies do not change.
+
+    pub async fn get_calendar_access_status(&self) -> Result<models::CalendarAccessStatus, TaktError> {
+        let bridge = self.bridge.clone();
+        tokio_runtime()
+            .spawn(async move { bridge.get_calendar_access_status() })
+            .await
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
+    }
+
+    pub async fn request_calendar_access(&self) -> Result<models::CalendarAccessStatus, TaktError> {
+        let bridge = self.bridge.clone();
+        tokio_runtime()
+            .spawn(async move { bridge.request_calendar_access() })
+            .await
+            .map_err(|e| TaktError::Database { msg: e.to_string() })?
+    }
+
+    pub async fn list_calendars(&self) -> Result<Vec<models::CalendarInfo>, TaktError> {
+        let bridge = self.bridge.clone();
+        tokio_runtime()
+            .spawn(async move { bridge.list_calendars() })
             .await
             .map_err(|e| TaktError::Database { msg: e.to_string() })?
     }
@@ -350,6 +382,7 @@ impl TaktCore {
                     task.notify_on_run,
                     &task.action,
                     &task.schedule,
+                    None,
                 )
                 .await
                 .map_err(|msg| TaktError::Execution { msg })
@@ -393,7 +426,7 @@ impl TaktCore {
         let bridge = self.bridge.clone();
         self.state
             .get_or_try_init(|| async {
-                let store = Arc::new(TaskStore::new(pool));
+                let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
                 let executor = current_executor(bridge.clone());
                 let scheduler = Arc::new(
                     AppScheduler::new(

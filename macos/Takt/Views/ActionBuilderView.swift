@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct ActionBuilderView: View {
     @Binding var action: Action
+    var schedule: Schedule       // for template-var hint visibility
     var browsers: [String]
     var fileApps: [String]
     var onFilePathChanged: () -> Void
@@ -19,7 +20,21 @@ struct ActionBuilderView: View {
         case .notify: return .notify
         case .webhook: return .webhook
         case .settings: return .settings
+        case .openEventLinks: return .openEventLinks
         }
+    }
+
+    private var isCalendarSchedule: Bool {
+        if case .calendar = schedule { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private var templateVarHint: some View {
+        Text("Use `{{event.title}}`, `{{event.start}}`, `{{event.conference_url}}`, etc.")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .italic()
     }
 
     var body: some View {
@@ -32,7 +47,7 @@ struct ActionBuilderView: View {
                     }
                 }
                 HStack(spacing: 2) {
-                    ForEach(ActionTypeTag.allCases.suffix(3)) { tag in
+                    ForEach(ActionTypeTag.allCases.suffix(4)) { tag in
                         actionTypeButton(tag)
                     }
                 }
@@ -61,6 +76,8 @@ struct ActionBuilderView: View {
                 webhookFields
             case .settings:
                 settingsFields
+            case .openEventLinks:
+                openEventLinksFields
             }
 
             // Post-shortcuts for file/url/app types
@@ -212,6 +229,10 @@ struct ActionBuilderView: View {
                     }
                 }
 
+                if isCalendarSchedule {
+                    templateVarHint
+                }
+
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Text("Browser")
@@ -338,6 +359,10 @@ struct ActionBuilderView: View {
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
                 }
+
+                if isCalendarSchedule {
+                    templateVarHint
+                }
             }
         }
     }
@@ -375,6 +400,10 @@ struct ActionBuilderView: View {
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
+                }
+
+                if isCalendarSchedule {
+                    templateVarHint
                 }
 
                 Toggle("Play sound", isOn: Binding(
@@ -467,6 +496,10 @@ struct ActionBuilderView: View {
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
                 }
+
+                if isCalendarSchedule {
+                    templateVarHint
+                }
             }
         }
     }
@@ -506,6 +539,56 @@ struct ActionBuilderView: View {
                     }
                 }
                 .labelsHidden()
+            }
+        }
+    }
+
+    // MARK: - OpenEventLinks
+
+    @ViewBuilder
+    private var openEventLinksFields: some View {
+        if case .openEventLinks(let openConference, let openNotesLinks, let browser) = action {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Open video conference link", isOn: Binding(
+                    get: { openConference },
+                    set: { newValue in
+                        action = .openEventLinks(
+                            openConference: newValue,
+                            openNotesLinks: openNotesLinks,
+                            browser: browser
+                        )
+                    }
+                ))
+                Toggle("Open links from event notes", isOn: Binding(
+                    get: { openNotesLinks },
+                    set: { newValue in
+                        action = .openEventLinks(
+                            openConference: openConference,
+                            openNotesLinks: newValue,
+                            browser: browser
+                        )
+                    }
+                ))
+                Picker("Browser", selection: Binding(
+                    get: { browser ?? "__default__" },
+                    set: { newValue in
+                        let b: String? = newValue == "__default__" ? nil : newValue
+                        action = .openEventLinks(
+                            openConference: openConference,
+                            openNotesLinks: openNotesLinks,
+                            browser: b
+                        )
+                    }
+                )) {
+                    Text("Default browser").tag("__default__")
+                    ForEach(browsers, id: \.self) { b in
+                        Text(b).tag(b)
+                    }
+                }
+                Text("Only fires with a Calendar schedule. Run Now will fail without event context.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
     }
@@ -685,7 +768,7 @@ struct ActionBuilderView: View {
 // MARK: - ActionTypeTag
 
 enum ActionTypeTag: String, CaseIterable, Identifiable {
-    case openUrl, openFile, openApp, runCommand, notify, webhook, settings
+    case openUrl, openFile, openApp, runCommand, notify, webhook, settings, openEventLinks
 
     var id: String { rawValue }
 
@@ -698,6 +781,7 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return "Notify"
         case .webhook: return "Hook"
         case .settings: return "Settings"
+        case .openEventLinks: return "Event Links"
         }
     }
 
@@ -710,6 +794,7 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return "bell"
         case .webhook: return "globe"
         case .settings: return "gearshape"
+        case .openEventLinks: return "calendar.badge.clock"
         }
     }
 
@@ -722,6 +807,7 @@ enum ActionTypeTag: String, CaseIterable, Identifiable {
         case .notify: return .notify
         case .webhook: return .webhook
         case .settings: return .settings
+        case .openEventLinks: return .openMeetingLinks
         }
     }
 }

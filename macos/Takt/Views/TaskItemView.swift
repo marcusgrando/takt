@@ -34,6 +34,26 @@ struct TaskItemView: View {
                     .foregroundStyle(actionColor)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
 
+                if task.health != .healthy {
+                    Button {
+                        openEditor(EditorParams(taskId: task.id, template: nil))
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: healthBadgeIcon(task.health))
+                                .font(.system(size: 10))
+                            Text(healthBadgeText(task.health))
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(healthBadgeColor(task.health).opacity(0.2))
+                        .foregroundStyle(healthBadgeColor(task.health))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help(healthBadgeTooltip(task.health))
+                }
+
                 Toggle("", isOn: Binding(
                     get: { task.enabled },
                     set: { _ in
@@ -140,6 +160,7 @@ struct TaskItemView: View {
         case .openApp: return "app"
         case .webhook: return "webhook"
         case .settings: return "settings"
+        case .openEventLinks: return "event"
         }
     }
 
@@ -152,6 +173,46 @@ struct TaskItemView: View {
         case .openApp: return .cyan
         case .webhook: return .teal
         case .settings: return .gray
+        case .openEventLinks: return .teal
+        }
+    }
+
+    private func healthBadgeText(_ health: TaskHealth) -> String {
+        switch health {
+        case .healthy: return ""
+        case .calendarNotFound: return "Calendar missing"
+        case .calendarAccessDenied: return "Access denied"
+        case .calendarAccessNotDetermined: return "Grant access"
+        }
+    }
+
+    private func healthBadgeIcon(_ health: TaskHealth) -> String {
+        switch health {
+        case .healthy: return ""
+        case .calendarNotFound: return "calendar.badge.exclamationmark"
+        case .calendarAccessDenied: return "lock.fill"
+        case .calendarAccessNotDetermined: return "hand.raised.fill"
+        }
+    }
+
+    private func healthBadgeColor(_ health: TaskHealth) -> Color {
+        switch health {
+        case .healthy: return .primary
+        case .calendarNotFound: return .red
+        case .calendarAccessDenied: return .orange
+        case .calendarAccessNotDetermined: return .yellow
+        }
+    }
+
+    private func healthBadgeTooltip(_ health: TaskHealth) -> String {
+        switch health {
+        case .healthy: return ""
+        case .calendarNotFound:
+            return "The calendar referenced by this task no longer exists. Click to edit or delete."
+        case .calendarAccessDenied:
+            return "Calendar access is denied. Click to edit, or grant access in System Settings."
+        case .calendarAccessNotDetermined:
+            return "Calendar access has not been granted yet. Click to edit and grant access."
         }
     }
 

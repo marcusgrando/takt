@@ -23,7 +23,11 @@ impl MacosExecutor {
 
 #[async_trait]
 impl ActionExecutor for MacosExecutor {
-    async fn execute(&self, action: &Action) -> Result<ExecutionResult, ExecutorError> {
+    async fn execute(
+        &self,
+        action: &Action,
+        event: Option<&crate::models::CalendarEvent>,
+    ) -> Result<ExecutionResult, ExecutorError> {
         match action {
             Action::OpenFile {
                 path,
@@ -49,7 +53,11 @@ impl ActionExecutor for MacosExecutor {
                 post_shortcuts,
                 shortcut_delay_secs,
             } => {
-                for url in urls {
+                let urls: Vec<String> = urls
+                    .iter()
+                    .map(|u| crate::template::substitute_event_vars(u, event))
+                    .collect();
+                for url in &urls {
                     let url = url.clone();
                     let browser = browser.clone();
                     platform::run_on_main(&*self.bridge, move || {
@@ -88,14 +96,86 @@ impl ActionExecutor for MacosExecutor {
                     stderr: None,
                 })
             }
+            Action::OpenEventLinks {
+                open_conference,
+                open_notes_links,
+                browser,
+            } => {
+                let event = event.ok_or_else(|| {
+                    ExecutorError::MissingEventContext(
+                        "OpenEventLinks requires a Calendar schedule — this action cannot be \"Run Now\"-triggered without an event.".to_string()
+                    )
+                })?;
+
+                let mut urls: Vec<String> = Vec::new();
+
+                if *open_conference {
+                    if let Some(conf) = event.conference_url.as_deref() {
+                        if !conf.is_empty() {
+                            urls.push(conf.to_string());
+                        }
+                    }
+                }
+
+                if *open_notes_links {
+                    let extracted = crate::url_extract::collect_event_urls(
+                        event.notes.as_deref(),
+                        event.location.as_deref(),
+                        event.conference_url.as_deref(),
+                    );
+                    for url in extracted {
+                        if !urls.contains(&url) {
+                            urls.push(url);
+                        }
+                    }
+                }
+
+                if urls.is_empty() {
+                    return Ok(ExecutionResult {
+                        stdout: Some(
+                            "No links to open (event has no conference URL or notes URLs)."
+                                .to_string(),
+                        ),
+                        stderr: None,
+                    });
+                }
+
+                let mut opened = Vec::new();
+                for url in &urls {
+                    let url_clone = url.clone();
+                    let browser_clone = browser.clone();
+                    platform::run_on_main(&*self.bridge, move || {
+                        open_url(&url_clone, browser_clone.as_deref())
+                    })
+                    .await?;
+                    opened.push(url.clone());
+                }
+
+                Ok(ExecutionResult {
+                    stdout: Some(format!(
+                        "Opened {} link(s):\n{}",
+                        opened.len(),
+                        opened.join("\n")
+                    )),
+                    stderr: None,
+                })
+            }
             Action::RunCommand {
                 command,
                 args,
                 shell,
-            } => run_command(command, args, shell),
+            } => {
+                let command = crate::template::substitute_event_vars(command, event);
+                let args: Vec<String> = args
+                    .iter()
+                    .map(|a| crate::template::substitute_event_vars(a, event))
+                    .collect();
+                run_command(&command, &args, shell)
+            }
             Action::Notify { title, body, sound } => {
-                self.bridge
-                    .send_notification(title.clone(), body.clone(), *sound);
+                let title = crate::template::substitute_event_vars(title, event);
+                let body = crate::template::substitute_event_vars(body, event);
+                self.bridge.send_notification(title, body, *sound);
                 Ok(ExecutionResult {
                     stdout: None,
                     stderr: None,
@@ -106,7 +186,17 @@ impl ActionExecutor for MacosExecutor {
                 method,
                 headers,
                 body,
-            } => send_webhook(url, method, headers, body.as_deref()).await,
+            } => {
+                let url = crate::template::substitute_event_vars(url, event);
+                let body = body
+                    .as_ref()
+                    .map(|b| crate::template::substitute_event_vars(b, event));
+                let headers: std::collections::HashMap<String, String> = headers
+                    .iter()
+                    .map(|(k, v)| (k.clone(), crate::template::substitute_event_vars(v, event)))
+                    .collect();
+                send_webhook(&url, method, &headers, body.as_deref()).await
+            }
         }
     }
 }
@@ -363,5 +453,71 @@ async fn send_webhook(
             "HTTP {} — {}",
             status, response_body
         )))
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod open_event_links_tests {
+    use crate::models::CalendarEvent;
+
+    fn sample_event_with_links() -> CalendarEvent {
+        CalendarEvent {
+            id: "e1".into(),
+            title: "Standup".into(),
+            start: "2026-04-12T09:00:00Z".into(),
+            end: "2026-04-12T09:30:00Z".into(),
+            notes: Some(
+                "Docs: https://docs.test/agenda\nSlides: https://slides.test/deck".into(),
+            ),
+            location: None,
+            url: None,
+            conference_url: Some("https://meet.test/abc".into()),
+            calendar_id: "cal-1".into(),
+        }
+    }
+
+    #[test]
+    fn collects_conference_and_notes_urls() {
+        let event = sample_event_with_links();
+        let urls = crate::url_extract::collect_event_urls(
+            event.notes.as_deref(),
+            event.location.as_deref(),
+            event.conference_url.as_deref(),
+        );
+        // collect_event_urls dedupes against conference_url, so only notes URLs are returned
+        assert_eq!(
+            urls,
+            vec!["https://docs.test/agenda", "https://slides.test/deck"]
+        );
+    }
+
+    #[test]
+    fn collect_event_urls_empty_when_no_notes_or_location() {
+        let event = CalendarEvent {
+            id: "e2".into(),
+            title: "Quiet Meeting".into(),
+            start: "2026-04-12T10:00:00Z".into(),
+            end: "2026-04-12T10:30:00Z".into(),
+            notes: None,
+            location: None,
+            url: None,
+            conference_url: Some("https://meet.test/xyz".into()),
+            calendar_id: "cal-1".into(),
+        };
+        let urls = crate::url_extract::collect_event_urls(
+            event.notes.as_deref(),
+            event.location.as_deref(),
+            event.conference_url.as_deref(),
+        );
+        // conference_url is excluded from collect_event_urls output (it's only used for dedup)
+        assert!(urls.is_empty());
+    }
+
+    #[test]
+    fn collect_event_urls_all_none() {
+        let urls = crate::url_extract::collect_event_urls(None, None, None);
+        assert!(urls.is_empty());
     }
 }

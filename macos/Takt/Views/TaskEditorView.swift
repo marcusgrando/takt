@@ -36,7 +36,7 @@ struct TaskEditorView: View {
                             .font(.system(size: 10, weight: .medium))
                             .tracking(1.5)
                             .foregroundStyle(.secondary)
-                        ActionBuilderView(action: $vm.action, browsers: vm.browsers, fileApps: vm.fileApps, onFilePathChanged: {
+                        ActionBuilderView(action: $vm.action, schedule: vm.schedule, browsers: vm.browsers, fileApps: vm.fileApps, onFilePathChanged: {
                             vm.refreshFileApps()
                         })
                     }
@@ -49,7 +49,7 @@ struct TaskEditorView: View {
                             .font(.system(size: 10, weight: .medium))
                             .tracking(1.5)
                             .foregroundStyle(.secondary)
-                        ScheduleBuilderView(schedule: $vm.schedule)
+                        ScheduleBuilderView(schedule: $vm.schedule, core: vm.core)
                     }
 
                     // Run if missed

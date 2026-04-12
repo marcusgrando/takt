@@ -1,5 +1,5 @@
 use crate::executor::ActionExecutor;
-use crate::models::{Action, Schedule, TaskDto};
+use crate::models::{Action, CalendarEvent, Schedule, TaskDto};
 use crate::platform::PlatformBridge;
 use crate::store::TaskStore;
 use chrono::{DateTime, Local};
@@ -53,6 +53,7 @@ pub struct AppScheduler {
     job_ids: Mutex<HashMap<String, Uuid>>,
     /// Cancellation tokens for DailyFirstUse/OneShot spawned tasks
     cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    calendar_poller: Arc<Mutex<Option<Arc<crate::calendar::CalendarPoller>>>>,
 }
 
 impl AppScheduler {
@@ -69,6 +70,7 @@ impl AppScheduler {
             bridge,
             job_ids: Mutex::new(HashMap::new()),
             cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
+            calendar_poller: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -110,6 +112,9 @@ impl AppScheduler {
         // Re-fetch from DB so catch-up sees tasks disabled by scheduling failures
         let tasks = self.store.list_tasks().await?;
         self.catch_up_missed(&tasks).await;
+        if let Err(e) = self.reconstitute_calendar_dispatches().await {
+            eprintln!("Warning: failed to reconstitute calendar dispatches: {}", e);
+        }
         Ok(())
     }
 
@@ -135,6 +140,7 @@ impl AppScheduler {
                     }
                 }
                 Schedule::DailyFirstUse { .. } => false, // has its own logic
+                Schedule::Calendar { .. } => false, // Phase 1 stub: never catches up; real logic lands in Phase 3
             };
 
             if should_catch_up {
@@ -149,7 +155,7 @@ impl AppScheduler {
                 tokio::spawn(async move {
                     let _ = execute_and_log(
                         &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
-                        &schedule,
+                        &schedule, None,
                     )
                     .await;
                 });
@@ -194,7 +200,7 @@ impl AppScheduler {
                         }
                         let _ = execute_and_log(
                             &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
-                            &schedule,
+                            &schedule, None,
                         )
                         .await;
                     })
@@ -235,7 +241,7 @@ impl AppScheduler {
                         }
                         let _ = execute_and_log(
                             &*executor, &store, &*bridge, &task_id, &task_name, notify, &action,
-                            &schedule,
+                            &schedule, None,
                         )
                         .await;
                         tokens.lock().await.remove(&task_id);
@@ -266,6 +272,11 @@ impl AppScheduler {
                     .await;
                 });
             }
+            Schedule::Calendar { .. } => {
+                self.ensure_calendar_poller_running().await;
+                // The poller's periodic tick will create a reservation for
+                // this task's events; nothing to do synchronously.
+            }
         }
         Ok(())
     }
@@ -276,12 +287,119 @@ impl AppScheduler {
             self.inner.remove(&job_uuid).await?;
         }
         drop(ids);
-        // Cancel any spawned background task (DailyFirstUse / OneShot)
-        let mut tokens = self.cancel_tokens.lock().await;
-        if let Some(token) = tokens.remove(task_id) {
-            token.cancel();
+
+        // Cancel OneShot/DailyFirstUse token (keyed by plain task_id).
+        {
+            let mut tokens = self.cancel_tokens.lock().await;
+            if let Some(t) = tokens.remove(task_id) {
+                t.cancel();
+            }
+            // Also cancel any pending calendar dispatches for this task.
+            let calendar_keys: Vec<String> = tokens
+                .keys()
+                .filter(|k| crate::calendar::is_calendar_key_for(k, task_id))
+                .cloned()
+                .collect();
+            for k in calendar_keys {
+                if let Some(t) = tokens.remove(&k) {
+                    t.cancel();
+                }
+            }
+        }
+
+        // Delete any still-scheduled rows.
+        let _ = self.store.delete_scheduled_dispatches_for_task(task_id).await;
+        Ok(())
+    }
+
+    async fn ensure_calendar_poller_running(&self) {
+        let mut guard = self.calendar_poller.lock().await;
+        if guard.is_some() {
+            return;
+        }
+        let poller = Arc::new(crate::calendar::CalendarPoller::new(
+            Arc::clone(&self.store),
+            Arc::clone(&self.executor),
+            Arc::clone(&self.bridge),
+            Arc::clone(&self.cancel_tokens),
+        ));
+        *guard = Some(Arc::clone(&poller));
+        tokio::spawn(poller.run());
+    }
+
+    pub(crate) async fn reconstitute_calendar_dispatches(&self) -> anyhow::Result<()> {
+        let pending = self.store.list_pending_dispatches().await?;
+        for p in pending {
+            // Validate the task still exists and is a Calendar schedule.
+            let task = match self.store.get_task(&p.task_id).await? {
+                Some(t) if t.enabled => t,
+                _ => {
+                    let _ = self.store.delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start).await;
+                    continue;
+                }
+            };
+            if !matches!(task.schedule, Schedule::Calendar { .. }) {
+                let _ = self.store.delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start).await;
+                continue;
+            }
+
+            let trigger_at = match chrono::DateTime::parse_from_rfc3339(&p.trigger_at) {
+                Ok(dt) => dt.with_timezone(&chrono::Utc),
+                Err(_) => {
+                    let _ = self.store.delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start).await;
+                    continue;
+                }
+            };
+            let now = chrono::Utc::now();
+            let d = (trigger_at - now).num_seconds();
+
+            if d < 0 {
+                // Missed slot.
+                if task.run_if_missed {
+                    self.spawn_reconstituted_dispatch(task, p, 0).await;
+                } else {
+                    let _ = self.store.mark_calendar_dispatch_dispatched(&p.task_id, &p.event_id, &p.event_start).await;
+                    let _ = self.store.log_execution(
+                        &p.task_id, "skipped", None, None, Some("startup reconstitute: slot missed; run_if_missed=false".to_string()),
+                    ).await;
+                }
+            } else {
+                self.spawn_reconstituted_dispatch(task, p, d as u64).await;
+            }
         }
         Ok(())
+    }
+
+    async fn spawn_reconstituted_dispatch(
+        &self,
+        _task: TaskDto,
+        p: crate::store::PendingDispatch,
+        delay_secs: u64,
+    ) {
+        let key = crate::calendar::dispatch_token_key(&p.task_id, &p.event_id, &p.event_start);
+        let token = tokio_util::sync::CancellationToken::new();
+        let child = token.child_token();
+        self.cancel_tokens.lock().await.insert(key.clone(), token);
+
+        let store = Arc::clone(&self.store);
+        let executor = Arc::clone(&self.executor);
+        let bridge = Arc::clone(&self.bridge);
+        let cancel_tokens = Arc::clone(&self.cancel_tokens);
+        let task_id = p.task_id.clone();
+        let event_id = p.event_id.clone();
+        let event_start = p.event_start.clone();
+
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = child.cancelled() => {
+                    cancel_tokens.lock().await.remove(&key);
+                    return;
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs)) => {}
+            }
+            crate::calendar::run_dispatch_pub(store, executor, bridge, task_id, event_id, event_start).await;
+            cancel_tokens.lock().await.remove(&key);
+        });
     }
 }
 
@@ -373,6 +491,7 @@ async fn daily_first_use_loop(
                 }
                 let _ = execute_and_log(
                     &*executor, &store, &*bridge, &task_id, &task_name, notify, &action, &schedule,
+                    None,
                 )
                 .await;
                 break;
@@ -426,8 +545,9 @@ pub(crate) async fn execute_and_log(
     notify: bool,
     action: &Action,
     schedule: &Schedule,
+    event: Option<&CalendarEvent>,
 ) -> Result<(), String> {
-    let result = executor.execute(action).await;
+    let result = executor.execute(action, event).await;
     let (status, stdout, stderr, error) = match &result {
         Ok(r) => ("success", r.stdout.clone(), r.stderr.clone(), None),
         Err(e) => ("failure", None, None, Some(e.to_string())),
@@ -435,8 +555,13 @@ pub(crate) async fn execute_and_log(
     if notify {
         send_run_notification(bridge, task_name, status == "success");
     }
+    let stdout_with_trace = match (event, stdout.as_ref()) {
+        (Some(e), Some(s)) => Some(format!("Triggered by event: {} @ {}\n{}", e.title, e.start, s)),
+        (Some(e), None) => Some(format!("Triggered by event: {} @ {}", e.title, e.start)),
+        (None, s) => s.cloned(),
+    };
     let _ = store
-        .log_execution(task_id, status, stdout, stderr, error.clone())
+        .log_execution(task_id, status, stdout_with_trace, stderr, error.clone())
         .await;
     let next_run = match schedule {
         Schedule::Cron { expression } => next_cron_fire(expression),

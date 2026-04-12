@@ -45,6 +45,7 @@ final class MacOSPlatformBridge: PlatformBridge, @unchecked Sendable {
         )
         return idleSeconds < Double(idleThresholdSecs)
     }
+
 }
 
 // NSWorkspace lookups — moved from Rust to Swift for correct main-thread access

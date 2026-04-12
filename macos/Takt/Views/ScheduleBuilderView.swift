@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ScheduleBuilderView: View {
     @Binding var schedule: Schedule
+    var core: TaktCore
 
     @State private var recurring: RecurringState = defaultRecurring
     @State private var oneShotDate = Date()
@@ -11,6 +12,7 @@ struct ScheduleBuilderView: View {
         case .cron: return .cron
         case .oneShot: return .oneShot
         case .dailyFirstUse: return .dailyFirstUse
+        case .calendar: return .calendar
         }
     }
 
@@ -51,6 +53,8 @@ struct ScheduleBuilderView: View {
                 oneShotContent
             case .dailyFirstUse:
                 dailyFirstUseContent
+            case .calendar:
+                CalendarScheduleBuilder(schedule: $schedule, core: core)
             }
         }
         .onAppear {
@@ -305,6 +309,8 @@ struct ScheduleBuilderView: View {
             schedule = .oneShot(runAt: formatter.string(from: oneShotDate))
         case .dailyFirstUse:
             schedule = .dailyFirstUse(delayMinutes: 5)
+        case .calendar:
+            schedule = .calendar(calendarId: "", titleContains: nil, minutesBefore: 5)
         }
     }
 
@@ -316,7 +322,7 @@ struct ScheduleBuilderView: View {
 // MARK: - ScheduleTypeTag
 
 enum ScheduleTypeTag: String, CaseIterable, Identifiable {
-    case cron, oneShot, dailyFirstUse
+    case cron, oneShot, dailyFirstUse, calendar
 
     var id: String { rawValue }
 
@@ -325,6 +331,7 @@ enum ScheduleTypeTag: String, CaseIterable, Identifiable {
         case .cron: return "Recurring"
         case .oneShot: return "One time"
         case .dailyFirstUse: return "Daily first use"
+        case .calendar: return "Calendar"
         }
     }
 
@@ -333,6 +340,7 @@ enum ScheduleTypeTag: String, CaseIterable, Identifiable {
         case .cron: return "repeat"
         case .oneShot: return "1.circle"
         case .dailyFirstUse: return "sunrise"
+        case .calendar: return "calendar"
         }
     }
 }

@@ -41,9 +41,11 @@ pub struct TaskDto {
     pub updated_at: String,
     pub last_run_at: Option<String>,
     pub next_run_at: Option<String>,
+    pub health: TaskHealth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(tag = "type")]
 pub enum Schedule {
     Cron {
@@ -56,9 +58,15 @@ pub enum Schedule {
         #[serde(default = "default_first_use_delay")]
         delay_minutes: u64,
     },
+    Calendar {
+        calendar_id: String,
+        title_contains: Option<String>,
+        minutes_before: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Modifier {
     Cmd,
     Shift,
@@ -67,9 +75,54 @@ pub enum Modifier {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct KeyCombo {
     pub modifiers: Vec<Modifier>,
     pub key: String,
+}
+
+// ── Calendar feature: shared types ───────────────────────────────────
+// These types land in Phase 1 as dormant data. They are populated and
+// consumed by Phases 2–4. In Phase 1 nothing writes them.
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum CalendarAccessStatus {
+    NotDetermined,
+    Denied,
+    Authorized,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum TaskHealth {
+    Healthy,
+    CalendarNotFound,
+    CalendarAccessDenied,
+    CalendarAccessNotDetermined,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct CalendarInfo {
+    pub id: String,
+    pub title: String,
+    pub source: String,
+    pub color_hex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct CalendarEvent {
+    pub id: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    pub notes: Option<String>,
+    pub location: Option<String>,
+    pub url: Option<String>,
+    pub conference_url: Option<String>,
+    pub calendar_id: String,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -110,6 +163,11 @@ pub enum Action {
     },
     Settings {
         pane_url: String,
+    },
+    OpenEventLinks {
+        open_conference: bool,
+        open_notes_links: bool,
+        browser: Option<String>,
     },
 }
 
@@ -175,6 +233,14 @@ impl Serialize for Action {
                 map.serialize_entry("pane_url", pane_url)?;
                 map.end()
             }
+            Action::OpenEventLinks { open_conference, open_notes_links, browser } => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "OpenEventLinks")?;
+                map.serialize_entry("open_conference", open_conference)?;
+                map.serialize_entry("open_notes_links", open_notes_links)?;
+                map.serialize_entry("browser", browser)?;
+                map.end()
+            }
         }
     }
 }
@@ -232,12 +298,18 @@ impl<'de> Deserialize<'de> for Action {
             "Settings" => Ok(Action::Settings {
                 pane_url: obj.get("pane_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             }),
-            other => Err(de::Error::unknown_variant(other, &["OpenFile", "OpenUrl", "OpenApp", "RunCommand", "Notify", "Webhook", "Settings"])),
+            "OpenEventLinks" => Ok(Action::OpenEventLinks {
+                open_conference: obj.get("open_conference").and_then(|v| v.as_bool()).unwrap_or(true),
+                open_notes_links: obj.get("open_notes_links").and_then(|v| v.as_bool()).unwrap_or(true),
+                browser: obj.get("browser").and_then(|v| v.as_str()).map(String::from),
+            }),
+            other => Err(de::Error::unknown_variant(other, &["OpenFile", "OpenUrl", "OpenApp", "RunCommand", "Notify", "Webhook", "Settings", "OpenEventLinks"])),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Shell {
     Sh,
     Bash,
@@ -247,6 +319,7 @@ pub enum Shell {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[cfg_attr(test, derive(PartialEq))]
 #[allow(clippy::upper_case_acronyms)]
 pub enum HttpMethod {
     GET,
@@ -307,6 +380,81 @@ impl Task {
             updated_at: self.updated_at.clone(),
             last_run_at: self.last_run_at.clone(),
             next_run_at: self.next_run_at.clone(),
+            health: TaskHealth::Healthy, // Phase 1: always Healthy. Phase 2 populates based on platform bridge.
         })
+    }
+}
+
+#[cfg(test)]
+mod phase1_calendar_tests {
+    use super::*;
+
+    #[test]
+    fn schedule_calendar_round_trips_through_serde() {
+        let schedule = Schedule::Calendar {
+            calendar_id: "cal-abc-123".to_string(),
+            title_contains: Some("standup".to_string()),
+            minutes_before: 5,
+        };
+        let json = serde_json::to_string(&schedule).expect("serialize");
+        let parsed: Schedule = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(schedule, parsed);
+    }
+
+    #[test]
+    fn schedule_calendar_title_contains_none_round_trips() {
+        let schedule = Schedule::Calendar {
+            calendar_id: "cal-x".to_string(),
+            title_contains: None,
+            minutes_before: 0,
+        };
+        let json = serde_json::to_string(&schedule).expect("serialize");
+        let parsed: Schedule = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(schedule, parsed);
+    }
+
+    #[test]
+    fn action_open_event_links_round_trips_through_serde() {
+        let action = Action::OpenEventLinks {
+            open_conference: true,
+            open_notes_links: false,
+            browser: Some("Safari".to_string()),
+        };
+        let json = serde_json::to_string(&action).expect("serialize");
+        let parsed: Action = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(action, parsed);
+    }
+
+    #[test]
+    fn action_open_event_links_defaults_when_fields_missing() {
+        // Simulates an older build or a hand-edited JSON with only the type tag.
+        let json = r#"{"type":"OpenEventLinks"}"#;
+        let parsed: Action = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            parsed,
+            Action::OpenEventLinks {
+                open_conference: true,
+                open_notes_links: true,
+                browser: None,
+            }
+        );
+    }
+
+    #[test]
+    fn calendar_event_round_trips_through_serde() {
+        let event = CalendarEvent {
+            id: "evt-1".to_string(),
+            title: "Team standup".to_string(),
+            start: "2026-04-12T09:00:00Z".to_string(),
+            end: "2026-04-12T09:30:00Z".to_string(),
+            notes: Some("Agenda: https://example.com/doc".to_string()),
+            location: None,
+            url: None,
+            conference_url: Some("https://meet.google.com/abc-defg-hij".to_string()),
+            calendar_id: "cal-abc-123".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        let parsed: CalendarEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(event, parsed);
     }
 }
