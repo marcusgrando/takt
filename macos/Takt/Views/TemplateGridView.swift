@@ -38,6 +38,8 @@ struct TemplateGridView: View {
                                     .foregroundStyle(.secondary)
                                 Text(template.label)
                                     .font(.system(size: 13, weight: .medium))
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2, reservesSpace: true)
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
