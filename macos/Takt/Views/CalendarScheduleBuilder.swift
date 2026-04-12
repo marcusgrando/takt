@@ -161,17 +161,23 @@ struct CalendarScheduleBuilder: View {
     }
 
     private func requestAccess() async {
-        // Call EventKit directly from the UI layer — no Rust round-trip.
-        // The bridge method (requestCalendarAccess) goes Swift → UniFFI → Rust →
-        // tokio → FFI back to Swift → DispatchQueue.main, which doesn't reliably
-        // show the system permission dialog when launched via LaunchServices.
-        // Calling EKEventStore directly on main (where SwiftUI views run) works.
+        // Call EventKit directly from the UI layer on the main thread.
+        // Using the completion-handler API to avoid Swift concurrency issues
+        // with the system permission dialog.
         let store = EKEventStore()
-        let granted: Bool
-        if #available(macOS 14.0, *) {
-            granted = (try? await store.requestFullAccessToEvents()) ?? false
-        } else {
-            granted = (try? await store.requestAccess(to: .event)) ?? false
+        let granted = await withCheckedContinuation { continuation in
+            if #available(macOS 14.0, *) {
+                store.requestFullAccessToEvents { granted, error in
+                    if let error { NSLog("[takt] EventKit request error: \(error)") }
+                    NSLog("[takt] EventKit requestFullAccessToEvents granted=\(granted)")
+                    continuation.resume(returning: granted)
+                }
+            } else {
+                store.requestAccess(to: .event) { granted, error in
+                    if let error { NSLog("[takt] EventKit request error: \(error)") }
+                    continuation.resume(returning: granted)
+                }
+            }
         }
         let status: CalendarAccessStatus = granted ? .authorized : .denied
         self.accessStatus = status
