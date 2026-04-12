@@ -86,13 +86,18 @@ extension MacOSPlatformBridge {
     func requestCalendarAccess() throws -> CalendarAccessStatus {
         let semaphore = DispatchSemaphore(value: 0)
         let store = CalendarStoreHolder.shared.store
-        if #available(macOS 14.0, *) {
-            store.requestFullAccessToEvents { _, _ in semaphore.signal() }
-            semaphore.wait()
-        } else {
-            store.requestAccess(to: .event) { _, _ in semaphore.signal() }
-            semaphore.wait()
+        // EventKit needs the main thread to present the permission dialog.
+        // This bridge method runs on a tokio background thread (via lib.rs spawn),
+        // so we dispatch the request to main. The main thread is free because
+        // UniFFI's async polling yields it via withUnsafeContinuation.
+        DispatchQueue.main.async {
+            if #available(macOS 14.0, *) {
+                store.requestFullAccessToEvents { _, _ in semaphore.signal() }
+            } else {
+                store.requestAccess(to: .event) { _, _ in semaphore.signal() }
+            }
         }
+        semaphore.wait()
         return mapAuthorizationStatus(EKEventStore.authorizationStatus(for: .event))
     }
 
