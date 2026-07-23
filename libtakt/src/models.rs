@@ -102,6 +102,15 @@ pub enum TaskHealth {
     CalendarAccessNotDetermined,
 }
 
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct UserActivitySnapshot {
+    pub session_active: bool,
+    pub eligibility_generation: u64,
+    pub input_event_count: u64,
+    pub eligibility_input_event_count: u64,
+    pub last_input_at_unix_millis: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct CalendarInfo {
@@ -382,6 +391,28 @@ impl Task {
             next_run_at: self.next_run_at.clone(),
             health: TaskHealth::Healthy, // Phase 1: always Healthy. Phase 2 populates based on platform bridge.
         })
+    }
+}
+
+#[cfg(test)]
+mod activity_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn user_activity_snapshot_preserves_activity_fields() {
+        let snapshot = UserActivitySnapshot {
+            session_active: true,
+            eligibility_generation: 7,
+            input_event_count: 11,
+            eligibility_input_event_count: 9,
+            last_input_at_unix_millis: Some(1_753_200_001_500),
+        };
+
+        assert!(snapshot.session_active);
+        assert_eq!(snapshot.eligibility_generation, 7);
+        assert_eq!(snapshot.input_event_count, 11);
+        assert_eq!(snapshot.eligibility_input_event_count, 9);
+        assert_eq!(snapshot.last_input_at_unix_millis, Some(1_753_200_001_500));
     }
 }
 

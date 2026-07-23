@@ -10,6 +10,8 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+mod daily_first_use;
+
 pub(crate) fn normalize_cron(expr: &str) -> String {
     let expr = expr.trim();
     let parts: Vec<&str> = expr.split_whitespace().collect();
@@ -249,7 +251,8 @@ impl AppScheduler {
                 }
             }
             Schedule::DailyFirstUse { delay_minutes } => {
-                let required_secs: u64 = delay_minutes * 60;
+                let required_delay =
+                    std::time::Duration::from_secs(delay_minutes.saturating_mul(60));
                 let token = CancellationToken::new();
                 let child_token = token.child_token();
                 self.cancel_tokens
@@ -257,9 +260,9 @@ impl AppScheduler {
                     .await
                     .insert(task_id.clone(), token);
                 tokio::spawn(async move {
-                    daily_first_use_loop(
+                    daily_first_use::run(
                         child_token,
-                        required_secs,
+                        required_delay,
                         executor,
                         store,
                         bridge,
@@ -403,128 +406,6 @@ impl AppScheduler {
     }
 }
 
-/// Runs the DailyFirstUse logic in a loop that re-arms each day.
-///
-/// Accumulates time only when the user is truly active: screen unlocked AND
-/// recent HID input (keyboard/mouse). Resets the accumulator after system
-/// sleep or prolonged user inactivity (> IDLE_RESET_SECS without input).
-#[allow(clippy::too_many_arguments)]
-async fn daily_first_use_loop(
-    cancel: CancellationToken,
-    required_secs: u64,
-    executor: Arc<dyn ActionExecutor>,
-    store: Arc<TaskStore>,
-    bridge: Arc<dyn PlatformBridge>,
-    task_id: String,
-    task_name: String,
-    notify: bool,
-    action: Action,
-    schedule: Schedule,
-) {
-    const TICK_SECS: u64 = 30;
-    // If a tick takes more than 10 minutes, the system was truly asleep
-    const SLEEP_THRESHOLD_SECS: u64 = 600;
-    // Consider user idle if no HID input for this many seconds
-    const IDLE_THRESHOLD_SECS: u64 = 60;
-    // Reset accumulator after this many consecutive idle ticks
-    const IDLE_RESET_SECS: u64 = 300;
-
-    loop {
-        // Skip if already ran today
-        if ran_today(&store, &task_id).await {
-            if wait_until_tomorrow_or_cancel(&cancel).await {
-                return;
-            }
-            continue;
-        }
-
-        let mut accumulated_secs: u64 = 0;
-        let mut consecutive_idle_secs: u64 = 0;
-
-        loop {
-            let before = std::time::Instant::now();
-            tokio::select! {
-                _ = cancel.cancelled() => return,
-                _ = tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)) => {}
-            }
-            let elapsed = before.elapsed().as_secs();
-
-            // System was truly asleep — reset everything
-            if elapsed > SLEEP_THRESHOLD_SECS {
-                accumulated_secs = 0;
-                consecutive_idle_secs = 0;
-                if ran_today(&store, &task_id).await {
-                    break;
-                }
-                continue;
-            }
-
-            // Check real user activity: screen unlocked + recent HID input
-            let user_active = bridge.is_user_active(IDLE_THRESHOLD_SECS);
-
-            if user_active {
-                consecutive_idle_secs = 0;
-                accumulated_secs += elapsed.min(TICK_SECS * 2);
-            } else {
-                consecutive_idle_secs += elapsed.min(TICK_SECS * 2);
-                // Reset accumulator after prolonged inactivity
-                if consecutive_idle_secs >= IDLE_RESET_SECS {
-                    accumulated_secs = 0;
-                }
-            }
-
-            if accumulated_secs >= required_secs {
-                // Final guard: re-check enabled + not yet ran today
-                match store.get_task(&task_id).await {
-                    Ok(Some(t)) if t.enabled => {
-                        if ran_today(&store, &task_id).await {
-                            break;
-                        }
-                    }
-                    Ok(Some(_)) => {
-                        let _ = store
-                            .log_execution(&task_id, "skipped", None, None, None)
-                            .await;
-                        break;
-                    }
-                    _ => return,
-                }
-                let _ = execute_and_log(
-                    &*executor, &store, &*bridge, &task_id, &task_name, notify, &action, &schedule,
-                    None,
-                )
-                .await;
-                break;
-            }
-        }
-
-        // Wait until tomorrow to re-arm
-        if wait_until_tomorrow_or_cancel(&cancel).await {
-            return;
-        }
-    }
-}
-
-/// Sleep until just past local midnight. Returns true if cancelled.
-async fn wait_until_tomorrow_or_cancel(cancel: &CancellationToken) -> bool {
-    let now = Local::now();
-    let tomorrow = (now + chrono::Duration::days(1))
-        .date_naive()
-        .and_hms_opt(0, 0, 5)
-        .unwrap();
-    let tomorrow_local = tomorrow
-        .and_local_timezone(Local)
-        .single()
-        .unwrap_or_else(|| now + chrono::Duration::hours(24));
-    let duration = (tomorrow_local - now)
-        .to_std()
-        .unwrap_or(std::time::Duration::from_secs(3600));
-    tokio::select! {
-        _ = cancel.cancelled() => true,
-        _ = tokio::time::sleep(duration) => false,
-    }
-}
-
 /// Compute the next fire time for a cron expression from now.
 fn next_cron_fire(expression: &str) -> Option<String> {
     let expr = normalize_cron(expression);
@@ -583,17 +464,11 @@ pub(crate) fn send_run_notification(bridge: &dyn PlatformBridge, task_name: &str
     bridge.send_notification("Takt".to_string(), body, false);
 }
 
-/// Check if a task's last_run_at is today in local timezone.
-async fn ran_today(store: &TaskStore, task_id: &str) -> bool {
+/// Check if a task's last_run_at is on the provided local date.
+async fn ran_today(store: &TaskStore, task_id: &str, local_date: chrono::NaiveDate) -> bool {
     match store.get_task(task_id).await {
-        Ok(Some(t)) => {
-            if let Some(ref last_run) = t.last_run_at {
-                if let Ok(last) = chrono::DateTime::parse_from_rfc3339(last_run) {
-                    let last_local = last.with_timezone(&chrono::Local);
-                    return last_local.date_naive() == chrono::Local::now().date_naive();
-                }
-            }
-            false
+        Ok(Some(task)) => {
+            daily_first_use::last_run_is_on_local_date(task.last_run_at.as_deref(), local_date)
         }
         _ => false,
     }

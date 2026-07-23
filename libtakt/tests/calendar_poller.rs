@@ -45,8 +45,14 @@ impl MockBridge {
 impl PlatformBridge for MockBridge {
     fn send_notification(&self, _: String, _: String, _: bool) {}
     fn run_on_main_sync(&self, _: u64) {}
-    fn is_user_active(&self, _: u64) -> bool {
-        true
+    fn get_user_activity_snapshot(&self) -> UserActivitySnapshot {
+        UserActivitySnapshot {
+            session_active: true,
+            eligibility_generation: 0,
+            input_event_count: 0,
+            eligibility_input_event_count: 0,
+            last_input_at_unix_millis: None,
+        }
     }
     fn get_calendar_access_status(
         &self,

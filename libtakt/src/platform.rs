@@ -15,9 +15,10 @@ pub trait PlatformBridge: Send + Sync {
     /// then call `execute_callback(callbackId)` to run the closure.
     fn run_on_main_sync(&self, callback_id: u64);
 
-    /// Returns true when the user is actively present: screen is unlocked
-    /// AND there has been HID input (keyboard/mouse) within `idle_threshold_secs`.
-    fn is_user_active(&self, idle_threshold_secs: u64) -> bool;
+    /// Returns one native user activity observation for the current poll.
+    /// Native implementations must fail closed: unavailable eligibility or input
+    /// timing data must use `session_active = false` or no input timestamp.
+    fn get_user_activity_snapshot(&self) -> crate::models::UserActivitySnapshot;
 
     // ── Calendar methods (Phase 1: stubs; Phase 2: real EventKit impls) ──
 

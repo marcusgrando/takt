@@ -395,7 +395,15 @@ mod tests {
     impl PlatformBridge for NullBridge {
         fn send_notification(&self, _: String, _: String, _: bool) {}
         fn run_on_main_sync(&self, _: u64) {}
-        fn is_user_active(&self, _: u64) -> bool { true }
+        fn get_user_activity_snapshot(&self) -> crate::models::UserActivitySnapshot {
+            crate::models::UserActivitySnapshot {
+                session_active: true,
+                eligibility_generation: 0,
+                input_event_count: 0,
+                eligibility_input_event_count: 0,
+                last_input_at_unix_millis: None,
+            }
+        }
         fn get_calendar_access_status(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
             Ok(crate::models::CalendarAccessStatus::Authorized)
         }
@@ -707,7 +715,15 @@ mod health_tests {
     impl PlatformBridge for MockBridge {
         fn send_notification(&self, _: String, _: String, _: bool) {}
         fn run_on_main_sync(&self, _: u64) {}
-        fn is_user_active(&self, _: u64) -> bool { true }
+        fn get_user_activity_snapshot(&self) -> crate::models::UserActivitySnapshot {
+            crate::models::UserActivitySnapshot {
+                session_active: true,
+                eligibility_generation: 0,
+                input_event_count: 0,
+                eligibility_input_event_count: 0,
+                last_input_at_unix_millis: None,
+            }
+        }
         fn get_calendar_access_status(&self) -> Result<CalendarAccessStatus, crate::error::TaktError> {
             self.calls.lock().unwrap().push("get_status");
             Ok(self.status.clone())
