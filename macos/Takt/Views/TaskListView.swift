@@ -2,7 +2,7 @@ import SwiftUI
 
 enum MenuLayout {
     static let width: CGFloat = 340
-    static let height: CGFloat = 400
+    static let height: CGFloat = 360
 }
 
 struct TaskListView: View {
@@ -16,9 +16,7 @@ struct TaskListView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 24, height: 24)
-                    .accessibilityHidden(true)
-                Text("Takt")
-                    .font(.system(size: 18, weight: .medium))
+                    .accessibilityLabel("Takt")
                 Spacer()
                 Button {
                     vm.currentView = .templates
@@ -33,7 +31,7 @@ struct TaskListView: View {
                 .accessibilityLabel("New task")
             }
             .padding(.horizontal, 16)
-            .frame(height: 44)
+            .frame(height: 40)
 
             Divider()
 
@@ -82,7 +80,7 @@ struct TaskListView: View {
                 .buttonStyle(.borderless)
             }
             .padding(.horizontal, 16)
-            .frame(height: 36)
+            .frame(height: 32)
         }
         .frame(width: MenuLayout.width, height: MenuLayout.height)
         .background(PopoverEscHandler())
