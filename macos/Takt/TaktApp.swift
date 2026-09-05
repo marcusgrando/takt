@@ -1,27 +1,15 @@
 import Combine
+import OSLog
 import SwiftUI
 import UserNotifications
 
 @main
 struct TaktApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra("Takt", image: "MenuBarIcon") {
-            if let vm = appDelegate.vm {
-                TaskListView(vm: vm, openEditor: { params in
-                    appDelegate.editorParams = params
-                    appDelegate.captureAppToReactivate()
-                    appDelegate.dismissPopover()
-                    NSApp.setActivationPolicy(.regular)
-                    openWindow(id: "editor")
-                    NSApp.activate(ignoringOtherApps: true)
-                })
-            } else {
-                ProgressView("Starting...")
-                    .frame(width: 280, height: 400)
-            }
+            MenuBarContent(appDelegate: appDelegate)
         }
         .menuBarExtraStyle(.window)
 
@@ -30,17 +18,55 @@ struct TaktApp: App {
         // .id(editorParams) forces SwiftUI to destroy and recreate EditorWindowContent
         // when params change, ensuring a fresh ViewModel for each edit/new task.
         Window("", id: "editor") {
-            if let core = appDelegate.core, let params = appDelegate.editorParams {
-                EditorWindowContent(
-                    core: core,
-                    params: params,
-                    onSave: { Task { await appDelegate.vm?.refresh() } }
-                )
-                .id(params)
-            }
+            EditorSceneContent(appDelegate: appDelegate)
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 500, height: 600)
+    }
+}
+
+struct MenuBarContent: View {
+    @ObservedObject var appDelegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        if let vm = appDelegate.vm {
+            TaskListView(vm: vm, openEditor: { params in
+                appDelegate.editorParams = params
+                appDelegate.captureAppToReactivate()
+                appDelegate.dismissPopover()
+                NSApp.setActivationPolicy(.regular)
+                openWindow(id: "editor")
+                NSApp.activate(ignoringOtherApps: true)
+            })
+        } else if let error = appDelegate.startupError {
+            ContentUnavailableView {
+                Label("Unable to start Takt", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Quit Takt") { NSApp.terminate(nil) }
+            }
+            .frame(width: MenuLayout.width, height: MenuLayout.height)
+        } else {
+            ProgressView("Starting...")
+                .frame(width: MenuLayout.width, height: MenuLayout.height)
+        }
+    }
+}
+
+struct EditorSceneContent: View {
+    @ObservedObject var appDelegate: AppDelegate
+
+    var body: some View {
+        if let core = appDelegate.core, let params = appDelegate.editorParams {
+            EditorWindowContent(
+                core: core,
+                params: params,
+                onSave: { Task { await appDelegate.vm?.refresh() } }
+            )
+            .id(params)
+        }
     }
 }
 
@@ -145,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var vm: TaskListViewModel?
     @Published var core: TaktCore?
     @Published var editorParams: EditorParams?
+    @Published var startupError: String?
+    private let logger = Logger(subsystem: "app.takt", category: "startup")
     private var appToReactivate: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -167,8 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 try await core.start()
                 self.core = core
                 self.vm = TaskListViewModel(core: core)
+                self.logger.info("Initialization completed")
             } catch {
-                print("Failed to initialize Takt: \(error)")
+                self.startupError = String(describing: error)
+                self.logger.error("Initialization failed: \(String(describing: error), privacy: .public)")
             }
         }
     }

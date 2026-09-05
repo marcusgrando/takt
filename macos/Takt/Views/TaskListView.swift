@@ -1,27 +1,39 @@
 import SwiftUI
 
+enum MenuLayout {
+    static let width: CGFloat = 340
+    static let height: CGFloat = 400
+}
+
 struct TaskListView: View {
     var vm: TaskListViewModel
     var openEditor: (EditorParams) -> Void
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
+            HStack(spacing: 8) {
+                Image("MenuBarIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 24, height: 24)
+                    .accessibilityHidden(true)
                 Text("Takt")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 18, weight: .medium))
                 Spacer()
                 Button {
                     vm.currentView = .templates
                 } label: {
                     Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
                 .keyboardShortcut("n", modifiers: .command)
+                .help("New task")
+                .accessibilityLabel("New task")
             }
             .padding(.horizontal, 16)
-            .frame(height: 48)
+            .frame(height: 44)
 
             Divider()
 
@@ -70,9 +82,9 @@ struct TaskListView: View {
                 .buttonStyle(.borderless)
             }
             .padding(.horizontal, 16)
-            .frame(height: 40)
+            .frame(height: 36)
         }
-        .frame(width: 280, height: 400)
+        .frame(width: MenuLayout.width, height: MenuLayout.height)
         .background(PopoverEscHandler())
     }
 
