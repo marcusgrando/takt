@@ -7,9 +7,9 @@ use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode}
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2_app_kit::{NSWorkspace, NSWorkspaceOpenConfiguration};
 use objc2_foundation::{NSArray, NSString, NSURL};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::process::Command;
 
 pub struct MacosExecutor {
     bridge: Arc<dyn PlatformBridge>,
@@ -38,6 +38,8 @@ impl ActionExecutor for MacosExecutor {
                 let path = path.clone();
                 let app = app.clone();
                 platform::run_on_main(&*self.bridge, move || open_file(&path, app.as_deref()))
+                    .await?
+                    .wait()
                     .await?;
                 if !post_shortcuts.is_empty() {
                     wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
@@ -63,6 +65,8 @@ impl ActionExecutor for MacosExecutor {
                     platform::run_on_main(&*self.bridge, move || {
                         open_url(&url, browser.as_deref())
                     })
+                    .await?
+                    .wait()
                     .await?;
                 }
                 if !post_shortcuts.is_empty() {
@@ -79,7 +83,10 @@ impl ActionExecutor for MacosExecutor {
                 shortcut_delay_secs,
             } => {
                 let app_path = app_path.clone();
-                platform::run_on_main(&*self.bridge, move || open_app(&app_path)).await?;
+                platform::run_on_main(&*self.bridge, move || open_app(&app_path))
+                    .await?
+                    .wait()
+                    .await?;
                 if !post_shortcuts.is_empty() {
                     wait_and_send_shortcuts(post_shortcuts, *shortcut_delay_secs).await?;
                 }
@@ -90,7 +97,10 @@ impl ActionExecutor for MacosExecutor {
             }
             Action::Settings { pane_url } => {
                 let pane_url = pane_url.clone();
-                platform::run_on_main(&*self.bridge, move || open_url(&pane_url, None)).await?;
+                platform::run_on_main(&*self.bridge, move || open_url(&pane_url, None))
+                    .await?
+                    .wait()
+                    .await?;
                 Ok(ExecutionResult {
                     stdout: None,
                     stderr: None,
@@ -147,6 +157,8 @@ impl ActionExecutor for MacosExecutor {
                     platform::run_on_main(&*self.bridge, move || {
                         open_url(&url_clone, browser_clone.as_deref())
                     })
+                    .await?
+                    .wait()
                     .await?;
                     opened.push(url.clone());
                 }
@@ -164,14 +176,7 @@ impl ActionExecutor for MacosExecutor {
                 command,
                 args,
                 shell,
-            } => {
-                let command = crate::template::substitute_event_vars(command, event);
-                let args: Vec<String> = args
-                    .iter()
-                    .map(|a| crate::template::substitute_event_vars(a, event))
-                    .collect();
-                run_command(&command, &args, shell)
-            }
+            } => run_command(command, args, shell, event).await,
             Action::Notify { title, body, sound } => {
                 let title = crate::template::substitute_event_vars(title, event);
                 let body = crate::template::substitute_event_vars(body, event);
@@ -203,7 +208,54 @@ impl ActionExecutor for MacosExecutor {
 
 // ── Open via NSWorkspace (main thread) ────────────────────────────────
 
-fn open_file(path: &str, app: Option<&str>) -> Result<(), ExecutorError> {
+struct PendingOpen(tokio::sync::oneshot::Receiver<Result<(), ExecutorError>>);
+
+impl PendingOpen {
+    async fn wait(self) -> Result<(), ExecutorError> {
+        tokio::time::timeout(Duration::from_secs(30), self.0)
+            .await
+            .map_err(|_| ExecutorError::CommandFailed("Application open timed out".into()))?
+            .map_err(|_| {
+                ExecutorError::CommandFailed("Application open callback was dropped".into())
+            })?
+    }
+
+    fn completed() -> Self {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Ok(()));
+        Self(rx)
+    }
+}
+
+fn start_open(
+    f: impl FnOnce(
+        &block2::DynBlock<
+            dyn Fn(*mut objc2_app_kit::NSRunningApplication, *mut objc2_foundation::NSError),
+        >,
+    ),
+) -> PendingOpen {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = std::sync::Mutex::new(Some(tx));
+    let callback = block2::RcBlock::new(
+        move |_: *mut objc2_app_kit::NSRunningApplication,
+              error: *mut objc2_foundation::NSError| {
+            let result = if error.is_null() {
+                Ok(())
+            } else {
+                Err(ExecutorError::CommandFailed(
+                    unsafe { &*error }.localizedDescription().to_string(),
+                ))
+            };
+            if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let _ = tx.send(result);
+            }
+        },
+    );
+    f(&callback);
+    PendingOpen(rx)
+}
+
+fn open_file(path: &str, app: Option<&str>) -> Result<PendingOpen, ExecutorError> {
     let workspace = NSWorkspace::sharedWorkspace();
     let file_url = NSURL::fileURLWithPath(&NSString::from_str(path));
 
@@ -211,9 +263,14 @@ fn open_file(path: &str, app: Option<&str>) -> Result<(), ExecutorError> {
         let config = NSWorkspaceOpenConfiguration::configuration();
         let app_url = resolve_app_url(app_name);
         let urls = NSArray::from_retained_slice(&[file_url]);
-        workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
-            &urls, &app_url, &config, None,
-        );
+        return Ok(start_open(|callback| {
+            workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
+                &urls,
+                &app_url,
+                &config,
+                Some(callback),
+            )
+        }));
     } else {
         let opened = workspace.openURL(&file_url);
         if !opened {
@@ -223,10 +280,10 @@ fn open_file(path: &str, app: Option<&str>) -> Result<(), ExecutorError> {
             )));
         }
     }
-    Ok(())
+    Ok(PendingOpen::completed())
 }
 
-fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
+fn open_url(url: &str, browser: Option<&str>) -> Result<PendingOpen, ExecutorError> {
     let workspace = NSWorkspace::sharedWorkspace();
     // Normalize: add https:// only if no scheme is present at all.
     // Schemes like x-apple.systempreferences: use ":" without "://".
@@ -249,9 +306,14 @@ fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
         let config = NSWorkspaceOpenConfiguration::configuration();
         let app_url = resolve_app_url(browser_name);
         let urls = NSArray::from_retained_slice(&[ns_url]);
-        workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
-            &urls, &app_url, &config, None,
-        );
+        return Ok(start_open(|callback| {
+            workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
+                &urls,
+                &app_url,
+                &config,
+                Some(callback),
+            )
+        }));
     } else {
         let opened = workspace.openURL(&ns_url);
         if !opened {
@@ -261,15 +323,20 @@ fn open_url(url: &str, browser: Option<&str>) -> Result<(), ExecutorError> {
             )));
         }
     }
-    Ok(())
+    Ok(PendingOpen::completed())
 }
 
-fn open_app(app_path: &str) -> Result<(), ExecutorError> {
+fn open_app(app_path: &str) -> Result<PendingOpen, ExecutorError> {
     let workspace = NSWorkspace::sharedWorkspace();
     let app_url = NSURL::fileURLWithPath(&NSString::from_str(app_path));
     let config = NSWorkspaceOpenConfiguration::configuration();
-    workspace.openApplicationAtURL_configuration_completionHandler(&app_url, &config, None);
-    Ok(())
+    Ok(start_open(|callback| {
+        workspace.openApplicationAtURL_configuration_completionHandler(
+            &app_url,
+            &config,
+            Some(callback),
+        )
+    }))
 }
 
 fn resolve_app_url(app_name: &str) -> objc2::rc::Retained<NSURL> {
@@ -341,13 +408,28 @@ fn accessibility_is_trusted() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
-// ── RunCommand (std::process::Command — no native API advantage) ──────
-
-fn run_command(
+async fn run_command(
     command: &str,
     args: &[String],
     shell: &Shell,
+    event: Option<&crate::models::CalendarEvent>,
 ) -> Result<ExecutionResult, ExecutorError> {
+    let posix = matches!(shell, Shell::Sh | Shell::Bash | Shell::Zsh);
+    if command.contains("{{event.") || (posix && args.iter().any(|arg| arg.contains("{{event."))) {
+        return Err(ExecutorError::CommandFailed(
+            "Calendar templates cannot appear in interpreter code. Use quoted environment values such as \"$TAKT_EVENT_TITLE\". See docs/command-event-migration.md".into(),
+        ));
+    }
+    let args: Vec<String> = args
+        .iter()
+        .map(|arg| {
+            if posix {
+                arg.clone()
+            } else {
+                crate::template::substitute_event_vars(arg, event)
+            }
+        })
+        .collect();
     let (shell_bin, shell_flag) = match shell {
         Shell::Sh => ("/bin/sh", "-c"),
         Shell::Bash => ("/bin/bash", "-c"),
@@ -357,6 +439,21 @@ fn run_command(
     };
 
     let mut cmd = Command::new(shell_bin);
+    for field in [
+        "title",
+        "start",
+        "end",
+        "notes",
+        "location",
+        "url",
+        "conference_url",
+        "calendar_id",
+    ] {
+        cmd.env(
+            format!("TAKT_EVENT_{}", field.to_uppercase()),
+            crate::template::substitute_event_vars(&format!("{{{{event.{field}}}}}"), event),
+        );
+    }
     match shell {
         // POSIX shells: concat command + args into a single -c string.
         // Args are NOT quoted — they're part of the shell command, so the user
@@ -372,7 +469,7 @@ fn run_command(
         // Python: script via -c, then args as separate argv entries
         Shell::Python => {
             cmd.arg(shell_flag).arg(command);
-            for arg in args {
+            for arg in &args {
                 cmd.arg(arg);
             }
         }
@@ -381,14 +478,14 @@ fn run_command(
             cmd.arg(shell_flag).arg(command);
             if !args.is_empty() {
                 cmd.arg("--");
-                for arg in args {
+                for arg in &args {
                     cmd.arg(arg);
                 }
             }
         }
     }
 
-    let output = cmd.output()?;
+    let output = super::process::run(&mut cmd, Duration::from_secs(300)).await?;
     let stdout = if output.stdout.is_empty() {
         None
     } else {
@@ -419,7 +516,11 @@ async fn send_webhook(
     headers: &std::collections::HashMap<String, String>,
     body: Option<&str>,
 ) -> Result<ExecutionResult, ExecutorError> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| ExecutorError::Http(e.to_string()))?;
     let mut req = match method {
         HttpMethod::GET => client.get(url),
         HttpMethod::POST => client.post(url),
@@ -433,15 +534,25 @@ async fn send_webhook(
     if let Some(b) = body {
         req = req.body(b.to_string());
     }
-    let response = req
+    let mut response = req
         .send()
         .await
         .map_err(|e| ExecutorError::Http(e.to_string()))?;
     let status = response.status();
-    let response_body = response
-        .text()
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| ExecutorError::Http(e.to_string()))?;
+        .map_err(|e| ExecutorError::Http(e.to_string()))?
+    {
+        if bytes.len() + chunk.len() > super::process::OUTPUT_LIMIT {
+            return Err(ExecutorError::Http(
+                "Webhook response exceeded 1 MiB".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let response_body = String::from_utf8_lossy(&bytes).into_owned();
 
     if status.is_success() {
         Ok(ExecutionResult {
@@ -468,9 +579,7 @@ mod open_event_links_tests {
             title: "Standup".into(),
             start: "2026-04-12T09:00:00Z".into(),
             end: "2026-04-12T09:30:00Z".into(),
-            notes: Some(
-                "Docs: https://docs.test/agenda\nSlides: https://slides.test/deck".into(),
-            ),
+            notes: Some("Docs: https://docs.test/agenda\nSlides: https://slides.test/deck".into()),
             location: None,
             url: None,
             conference_url: Some("https://meet.test/abc".into()),
@@ -519,5 +628,160 @@ mod open_event_links_tests {
     fn collect_event_urls_all_none() {
         let urls = crate::url_extract::collect_event_urls(None, None, None);
         assert!(urls.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod execution_safety_tests {
+    use super::*;
+
+    struct UnusedBridge;
+
+    impl PlatformBridge for UnusedBridge {
+        fn send_notification(&self, _: String, _: String, _: bool) {
+            unreachable!()
+        }
+        fn run_on_main_sync(&self, _: u64) {
+            unreachable!()
+        }
+        fn get_user_activity_snapshot(&self) -> crate::models::UserActivitySnapshot {
+            unreachable!()
+        }
+        fn get_calendar_access_status(
+            &self,
+        ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+            unreachable!()
+        }
+        fn request_calendar_access(
+            &self,
+        ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+            unreachable!()
+        }
+        fn list_calendars(
+            &self,
+        ) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError> {
+            unreachable!()
+        }
+        fn fetch_events_in_window(
+            &self,
+            _: String,
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<crate::models::CalendarEvent>, crate::error::TaktError> {
+            unreachable!()
+        }
+        fn fetch_event_instance(
+            &self,
+            _: String,
+            _: String,
+            _: String,
+        ) -> Result<Option<crate::models::CalendarEvent>, crate::error::TaktError> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn calendar_environment_is_data_and_raw_shell_arguments_are_rejected() {
+        let event = crate::models::CalendarEvent {
+            id: "e".into(),
+            title: "$(printf injected)\" ' ; &\nsecond line".into(),
+            start: "2026-01-01T00:00:00Z".into(),
+            end: "2026-01-01T01:00:00Z".into(),
+            notes: None,
+            location: None,
+            url: None,
+            conference_url: None,
+            calendar_id: "c".into(),
+        };
+        let executor = MacosExecutor::new(Arc::new(UnusedBridge));
+        let unsafe_action = Action::RunCommand {
+            command: "printf '%s' '{{event.title}}'".into(),
+            args: vec![],
+            shell: Shell::Sh,
+        };
+        let error = executor
+            .execute(&unsafe_action, Some(&event))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("TAKT_EVENT_TITLE"));
+        for shell in [Shell::Sh, Shell::Bash, Shell::Zsh] {
+            let output = run_command(
+                "printf '%s' \"$TAKT_EVENT_TITLE\"",
+                &[],
+                &shell,
+                Some(&event),
+            )
+            .await
+            .unwrap();
+            assert_eq!(output.stdout.as_deref(), Some(event.title.as_str()));
+            assert!(run_command(
+                "printf '%s'",
+                &["'{{event.title}}'".into()],
+                &shell,
+                Some(&event)
+            )
+            .await
+            .is_err());
+        }
+        let output = run_command("printf '%s' \"$TAKT_EVENT_TITLE\"", &[], &Shell::Sh, None)
+            .await
+            .unwrap();
+        assert!(output.stdout.is_none());
+    }
+
+    #[tokio::test]
+    async fn rejects_calendar_templates_in_interpreter_code() {
+        let result = run_command("printf '%s' '{{event.title}}'", &[], &Shell::Sh, None).await;
+        assert!(
+            result.is_err(),
+            "calendar values must never become interpreter code"
+        );
+    }
+
+    #[tokio::test]
+    async fn bounds_command_output() {
+        for command in ["yes x | head -c 1100000", "yes x | head -c 1100000 >&2"] {
+            let result = run_command(command, &[], &Shell::Sh, None).await;
+            assert!(result.is_err(), "oversized output must fail");
+        }
+    }
+
+    #[tokio::test]
+    async fn command_does_not_block_runtime() {
+        let start = std::time::Instant::now();
+        let (_, elapsed) = tokio::join!(run_command("sleep 0.3", &[], &Shell::Sh, None), async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            start.elapsed()
+        });
+        assert!(elapsed < Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn bounds_webhook_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1100000\r\n\r\n")
+                .await
+                .unwrap();
+            let _ = stream.write_all(&vec![b'x'; 1100000]).await;
+        });
+        let result = send_webhook(&url, &HttpMethod::GET, &Default::default(), None).await;
+        server.await.unwrap();
+        assert!(result.is_err(), "oversized responses must fail");
+    }
+
+    #[tokio::test]
+    async fn missing_application_reports_native_error() {
+        let result = open_app("/nonexistent/Takt-test-missing.app")
+            .unwrap()
+            .wait()
+            .await;
+        assert!(result.is_err(), "launch must await the native error");
     }
 }

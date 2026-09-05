@@ -23,14 +23,26 @@ mod tests {
                 last_input_at_unix_millis: None,
             }
         }
-        fn get_calendar_access_status(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
-            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        fn get_calendar_access_status(
+            &self,
+        ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution {
+                msg: "not_implemented".to_string(),
+            })
         }
-        fn request_calendar_access(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
-            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        fn request_calendar_access(
+            &self,
+        ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution {
+                msg: "not_implemented".to_string(),
+            })
         }
-        fn list_calendars(&self) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError> {
-            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+        fn list_calendars(
+            &self,
+        ) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError> {
+            Err(crate::error::TaktError::Execution {
+                msg: "not_implemented".to_string(),
+            })
         }
         fn fetch_events_in_window(
             &self,
@@ -38,7 +50,9 @@ mod tests {
             _lookback_minutes: u32,
             _lookahead_minutes: u32,
         ) -> Result<Vec<crate::models::CalendarEvent>, crate::error::TaktError> {
-            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+            Err(crate::error::TaktError::Execution {
+                msg: "not_implemented".to_string(),
+            })
         }
         fn fetch_event_instance(
             &self,
@@ -46,7 +60,9 @@ mod tests {
             _event_id: String,
             _event_start: String,
         ) -> Result<Option<crate::models::CalendarEvent>, crate::error::TaktError> {
-            Err(crate::error::TaktError::Execution { msg: "not_implemented".to_string() })
+            Err(crate::error::TaktError::Execution {
+                msg: "not_implemented".to_string(),
+            })
         }
     }
 
@@ -68,6 +84,71 @@ mod tests {
         core.start().await.unwrap();
         let tasks = core.list_tasks().await.unwrap();
         assert!(tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn concurrent_start_initializes_resources_once() {
+        let core = TaktCore::new(Arc::new(MockBridge));
+        let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let connect = || {
+            let connections = connections.clone();
+            move || async move {
+                connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                db::connect_in_memory().await
+            }
+        };
+        let (first, second) = tokio::join!(
+            core.start_with_connector(connect()),
+            core.start_with_connector(connect()),
+        );
+        first.unwrap();
+        second.unwrap();
+        assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(core.list_tasks().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_start_can_retry_without_publishing_partial_state() {
+        let core = TaktCore::new(Arc::new(MockBridge));
+        let failed = core
+            .start_with_connector(|| async { anyhow::bail!("unavailable database") })
+            .await;
+        assert!(failed.is_err());
+        assert!(matches!(
+            core.list_tasks().await,
+            Err(TaktError::NotInitialized)
+        ));
+        core.start_with_connector(db::connect_in_memory)
+            .await
+            .unwrap();
+        assert!(core.list_tasks().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelling_start_waiter_does_not_duplicate_initialization() {
+        let core = Arc::new(TaktCore::new(Arc::new(MockBridge)));
+        let starting_core = core.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            starting_core
+                .start_with_connector(|| async move {
+                    started_tx.send(()).unwrap();
+                    release_rx.await.unwrap();
+                    db::connect_in_memory().await
+                })
+                .await
+        });
+        started_rx.await.unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        release_tx.send(()).unwrap();
+        core.start_with_connector(|| async {
+            anyhow::bail!("initialization must remain owned by the original worker")
+        })
+        .await
+        .unwrap();
+        assert!(core.list_tasks().await.unwrap().is_empty());
     }
 
     #[tokio::test]

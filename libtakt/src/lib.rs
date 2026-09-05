@@ -45,7 +45,7 @@ struct InitializedState {
 #[derive(uniffi::Object)]
 pub struct TaktCore {
     bridge: Arc<dyn PlatformBridge>,
-    state: tokio::sync::OnceCell<InitializedState>,
+    state: Arc<tokio::sync::OnceCell<InitializedState>>,
 }
 
 /// Private helpers (not exported via UniFFI).
@@ -65,6 +65,49 @@ impl TaktCore {
     fn executor_ref(&self) -> Result<&Arc<dyn ActionExecutor>, TaktError> {
         Ok(&self.state()?.executor)
     }
+
+    async fn start_with_connector<F, Fut>(&self, connect: F) -> Result<(), TaktError>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<sqlx::SqlitePool>> + Send,
+    {
+        let bridge = self.bridge.clone();
+        let state = self.state.clone();
+        // The worker owns initialization even if an FFI caller stops waiting.
+        tokio_runtime()
+            .spawn(async move {
+                state
+                    .get_or_try_init(|| async move {
+                        let pool = connect().await?;
+                        let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
+                        let executor = current_executor(bridge.clone());
+                        let scheduler = Arc::new(
+                            AppScheduler::new(store.clone(), executor.clone(), bridge.clone())
+                                .await
+                                .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?,
+                        );
+                        scheduler
+                            .start()
+                            .await
+                            .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?;
+                        if let Err(e) = scheduler.load_all_tasks().await {
+                            eprintln!("Warning: failed to load tasks: {}", e);
+                        }
+                        launch_agent::ensure_registered();
+                        Ok::<_, TaktError>(InitializedState {
+                            store,
+                            scheduler,
+                            executor,
+                        })
+                    })
+                    .await
+                    .map(|_| ())
+            })
+            .await
+            .map_err(|e| TaktError::Database {
+                msg: format!("runtime join error: {}", e),
+            })?
+    }
 }
 
 #[uniffi::export]
@@ -73,7 +116,7 @@ impl TaktCore {
     pub fn new(bridge: Arc<dyn PlatformBridge>) -> Self {
         Self {
             bridge,
-            state: tokio::sync::OnceCell::new(),
+            state: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
@@ -82,45 +125,7 @@ impl TaktCore {
     /// futures from non-tokio threads that lack the context needed by
     /// sqlx / tokio-cron-scheduler.
     pub async fn start(&self) -> Result<(), TaktError> {
-        if self.state.get().is_some() {
-            return Ok(());
-        }
-        let bridge = self.bridge.clone();
-        let state = tokio_runtime()
-            .spawn(async move {
-                let pool = db::connect().await?;
-                let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
-                let executor = current_executor(bridge.clone());
-                let scheduler = Arc::new(
-                    AppScheduler::new(
-                        Arc::clone(&store),
-                        Arc::clone(&executor),
-                        Arc::clone(&bridge),
-                    )
-                    .await
-                    .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?,
-                );
-                scheduler
-                    .start()
-                    .await
-                    .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?;
-                if let Err(e) = scheduler.load_all_tasks().await {
-                    eprintln!("Warning: failed to load tasks: {}", e);
-                }
-                launch_agent::ensure_registered();
-                Ok::<_, TaktError>(InitializedState {
-                    store,
-                    scheduler,
-                    executor,
-                })
-            })
-            .await
-            .map_err(|e| TaktError::Database {
-                msg: format!("runtime join error: {}", e),
-            })??;
-        // If another call raced us, discard our state (first writer wins).
-        let _ = self.state.set(state);
-        Ok(())
+        self.start_with_connector(db::connect).await
     }
 
     // -- Task CRUD -------------------------------------------------------
@@ -134,11 +139,10 @@ impl TaktCore {
     }
 
     // ── Calendar APIs ─────────────────────────────────────────────────
-    // Phase 1: thin pass-throughs to a stub bridge (returns not_implemented).
-    // Phase 2 replaces the bridge with a real EventKit-backed implementation;
-    // these method bodies do not change.
 
-    pub async fn get_calendar_access_status(&self) -> Result<models::CalendarAccessStatus, TaktError> {
+    pub async fn get_calendar_access_status(
+        &self,
+    ) -> Result<models::CalendarAccessStatus, TaktError> {
         let bridge = self.bridge.clone();
         tokio_runtime()
             .spawn(async move { bridge.get_calendar_access_status() })
@@ -423,32 +427,7 @@ impl TaktCore {
 #[cfg(test)]
 impl TaktCore {
     async fn start_with_pool(&self, pool: sqlx::SqlitePool) -> Result<(), TaktError> {
-        let bridge = self.bridge.clone();
-        self.state
-            .get_or_try_init(|| async {
-                let store = Arc::new(TaskStore::new(pool, Arc::clone(&bridge)));
-                let executor = current_executor(bridge.clone());
-                let scheduler = Arc::new(
-                    AppScheduler::new(
-                        Arc::clone(&store),
-                        Arc::clone(&executor),
-                        Arc::clone(&bridge),
-                    )
-                    .await
-                    .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?,
-                );
-                scheduler
-                    .start()
-                    .await
-                    .map_err(|e| TaktError::Scheduler { msg: e.to_string() })?;
-                Ok::<_, TaktError>(InitializedState {
-                    store,
-                    scheduler,
-                    executor,
-                })
-            })
-            .await?;
-        Ok(())
+        self.start_with_connector(|| async move { Ok(pool) }).await
     }
 }
 

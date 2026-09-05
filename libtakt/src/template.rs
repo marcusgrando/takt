@@ -55,8 +55,8 @@ fn resolve(token: &str, event: Option<&CalendarEvent>) -> Option<String> {
         None => {
             // Permissive mode: known fields resolve to empty strings.
             return match field {
-                "title" | "start" | "end" | "notes" | "location"
-                | "url" | "conference_url" | "calendar_id" => Some(String::new()),
+                "title" | "start" | "end" | "notes" | "location" | "url" | "conference_url"
+                | "calendar_id" => Some(String::new()),
                 _ => None,
             };
         }
@@ -101,10 +101,7 @@ mod tests {
 
     #[test]
     fn substitutes_multiple_vars() {
-        let r = substitute_event_vars(
-            "{{event.title}} at {{event.start}}",
-            Some(&sample_event()),
-        );
+        let r = substitute_event_vars("{{event.title}} at {{event.start}}", Some(&sample_event()));
         assert_eq!(r, "Team standup at 2026-04-12T09:00:00Z");
     }
 

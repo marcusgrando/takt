@@ -1,4 +1,6 @@
-use crate::models::{Action, CalendarAccessStatus, ExecutionLog, Schedule, Task, TaskDto, TaskHealth};
+use crate::models::{
+    Action, CalendarAccessStatus, ExecutionLog, Schedule, Task, TaskDto, TaskHealth,
+};
 use crate::platform::PlatformBridge;
 use chrono::Utc;
 use sqlx::SqlitePool;
@@ -28,7 +30,9 @@ impl TaskStore {
     /// Populate `TaskDto.health` for every Calendar-scheduled task in the slice
     /// using at most two bridge calls. Non-Calendar tasks stay Healthy.
     fn populate_health(&self, tasks: &mut [TaskDto]) {
-        let has_calendar_task = tasks.iter().any(|t| matches!(t.schedule, Schedule::Calendar { .. }));
+        let has_calendar_task = tasks
+            .iter()
+            .any(|t| matches!(t.schedule, Schedule::Calendar { .. }));
         if !has_calendar_task {
             return;
         }
@@ -73,7 +77,8 @@ impl TaskStore {
         let rows: Vec<Task> = sqlx::query_as("SELECT * FROM tasks ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await?;
-        let mut dtos: Vec<TaskDto> = rows.iter()
+        let mut dtos: Vec<TaskDto> = rows
+            .iter()
             .map(|t| t.to_dto().map_err(|e| anyhow::anyhow!(e)))
             .collect::<anyhow::Result<_>>()?;
         self.populate_health(&mut dtos);
@@ -249,8 +254,7 @@ impl TaskStore {
 
     // ── calendar_dispatches helpers ───────────────────────────────────────────
 
-    /// Insert a new dispatch row.  Uses INSERT OR IGNORE so a duplicate
-    /// (task_id, event_id, event_start) triple is silently skipped.
+    /// Reserve an occurrence, returning false when it already exists.
     pub async fn insert_calendar_dispatch(
         &self,
         task_id: &str,
@@ -258,10 +262,14 @@ impl TaskStore {
         event_start: &str,
         status: &str,     // "scheduled" | "dispatched"
         trigger_at: &str, // ISO 8601
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
-        let dispatched_at: Option<&str> = if status == "dispatched" { Some(now.as_str()) } else { None };
-        sqlx::query(
+        let dispatched_at: Option<&str> = if status == "dispatched" {
+            Some(now.as_str())
+        } else {
+            None
+        };
+        let result = sqlx::query(
             "INSERT OR IGNORE INTO calendar_dispatches
              (task_id, event_id, event_start, status, trigger_at, reserved_at, dispatched_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -275,21 +283,21 @@ impl TaskStore {
         .bind(dispatched_at)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() == 1)
     }
 
-    /// Flip a row from 'scheduled' to 'dispatched' and record the timestamp.
+    /// Atomically claim a scheduled occurrence, returning true only to its owner.
     pub async fn mark_calendar_dispatch_dispatched(
         &self,
         task_id: &str,
         event_id: &str,
         event_start: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE calendar_dispatches
              SET status = 'dispatched', dispatched_at = ?
-             WHERE task_id = ? AND event_id = ? AND event_start = ?",
+             WHERE task_id = ? AND event_id = ? AND event_start = ? AND status = 'scheduled'",
         )
         .bind(&now)
         .bind(task_id)
@@ -297,7 +305,7 @@ impl TaskStore {
         .bind(event_start)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() == 1)
     }
 
     /// Delete a single dispatch row by its composite primary key.
@@ -374,12 +382,14 @@ impl TaskStore {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(task_id, event_id, event_start, trigger_at)| PendingDispatch {
-                task_id,
-                event_id,
-                event_start,
-                trigger_at,
-            })
+            .map(
+                |(task_id, event_id, event_start, trigger_at)| PendingDispatch {
+                    task_id,
+                    event_id,
+                    event_start,
+                    trigger_at,
+                },
+            )
             .collect())
     }
 }
@@ -404,19 +414,35 @@ mod tests {
                 last_input_at_unix_millis: None,
             }
         }
-        fn get_calendar_access_status(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+        fn get_calendar_access_status(
+            &self,
+        ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
             Ok(crate::models::CalendarAccessStatus::Authorized)
         }
-        fn request_calendar_access(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
+        fn request_calendar_access(
+            &self,
+        ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError> {
             Ok(crate::models::CalendarAccessStatus::Authorized)
         }
-        fn list_calendars(&self) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError> {
+        fn list_calendars(
+            &self,
+        ) -> Result<Vec<crate::models::CalendarInfo>, crate::error::TaktError> {
             Ok(vec![])
         }
-        fn fetch_events_in_window(&self, _: String, _: u32, _: u32) -> Result<Vec<crate::models::CalendarEvent>, crate::error::TaktError> {
+        fn fetch_events_in_window(
+            &self,
+            _: String,
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<crate::models::CalendarEvent>, crate::error::TaktError> {
             Ok(vec![])
         }
-        fn fetch_event_instance(&self, _: String, _: String, _: String) -> Result<Option<crate::models::CalendarEvent>, crate::error::TaktError> {
+        fn fetch_event_instance(
+            &self,
+            _: String,
+            _: String,
+            _: String,
+        ) -> Result<Option<crate::models::CalendarEvent>, crate::error::TaktError> {
             Ok(None)
         }
     }
@@ -553,15 +579,27 @@ mod tests {
     #[tokio::test]
     async fn test_insert_and_dispatch_exists() {
         let store = test_store().await;
-        let exists = store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap();
+        let exists = store
+            .dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap();
         assert!(!exists, "should not exist before insert");
 
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
 
-        let exists = store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap();
+        let exists = store
+            .dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap();
         assert!(exists, "should exist after insert");
     }
 
@@ -569,24 +607,46 @@ mod tests {
     async fn test_insert_or_ignore_is_idempotent() {
         let store = test_store().await;
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
         // Second insert with same PK should be silently ignored.
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
 
         let pending = store.list_pending_dispatches().await.unwrap();
-        assert_eq!(pending.len(), 1, "INSERT OR IGNORE must not duplicate the row");
+        assert_eq!(
+            pending.len(),
+            1,
+            "INSERT OR IGNORE must not duplicate the row"
+        );
     }
 
     #[tokio::test]
     async fn test_mark_dispatched() {
         let store = test_store().await;
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
 
@@ -601,20 +661,39 @@ mod tests {
 
         // After marking: no longer pending
         let pending = store.list_pending_dispatches().await.unwrap();
-        assert_eq!(pending.len(), 0, "dispatched row should not appear in pending list");
+        assert_eq!(
+            pending.len(),
+            0,
+            "dispatched row should not appear in pending list"
+        );
     }
 
     #[tokio::test]
     async fn test_delete_calendar_dispatch() {
         let store = test_store().await;
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
-        assert!(store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap());
+        assert!(store
+            .dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap());
 
-        store.delete_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap();
-        assert!(!store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap());
+        store
+            .delete_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap();
+        assert!(!store
+            .dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -622,30 +701,69 @@ mod tests {
         let store = test_store().await;
         // Insert two scheduled rows for task t1 and one dispatched row.
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
         store
-            .insert_calendar_dispatch("t1", "e2", "2026-05-02T10:00:00Z", "scheduled", "2026-05-02T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e2",
+                "2026-05-02T10:00:00Z",
+                "scheduled",
+                "2026-05-02T09:55:00Z",
+            )
             .await
             .unwrap();
         store
-            .insert_calendar_dispatch("t1", "e3", "2026-05-03T10:00:00Z", "dispatched", "2026-05-03T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e3",
+                "2026-05-03T10:00:00Z",
+                "dispatched",
+                "2026-05-03T09:55:00Z",
+            )
             .await
             .unwrap();
         // Insert a scheduled row for a different task.
         store
-            .insert_calendar_dispatch("t2", "e4", "2026-05-01T11:00:00Z", "scheduled", "2026-05-01T10:55:00Z")
+            .insert_calendar_dispatch(
+                "t2",
+                "e4",
+                "2026-05-01T11:00:00Z",
+                "scheduled",
+                "2026-05-01T10:55:00Z",
+            )
             .await
             .unwrap();
 
-        store.delete_scheduled_dispatches_for_task("t1").await.unwrap();
+        store
+            .delete_scheduled_dispatches_for_task("t1")
+            .await
+            .unwrap();
 
         // t1 scheduled rows gone; t1 dispatched row and t2 row still there.
-        assert!(!store.dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z").await.unwrap());
-        assert!(!store.dispatch_exists("t1", "e2", "2026-05-02T10:00:00Z").await.unwrap());
-        assert!(store.dispatch_exists("t1", "e3", "2026-05-03T10:00:00Z").await.unwrap());
-        assert!(store.dispatch_exists("t2", "e4", "2026-05-01T11:00:00Z").await.unwrap());
+        assert!(!store
+            .dispatch_exists("t1", "e1", "2026-05-01T10:00:00Z")
+            .await
+            .unwrap());
+        assert!(!store
+            .dispatch_exists("t1", "e2", "2026-05-02T10:00:00Z")
+            .await
+            .unwrap());
+        assert!(store
+            .dispatch_exists("t1", "e3", "2026-05-03T10:00:00Z")
+            .await
+            .unwrap());
+        assert!(store
+            .dispatch_exists("t2", "e4", "2026-05-01T11:00:00Z")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -653,35 +771,77 @@ mod tests {
         let store = test_store().await;
         // An event_start well in the past (should be pruned).
         store
-            .insert_calendar_dispatch("t1", "e1", "2020-01-01T00:00:00Z", "dispatched", "2020-01-01T00:00:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2020-01-01T00:00:00Z",
+                "dispatched",
+                "2020-01-01T00:00:00Z",
+            )
             .await
             .unwrap();
         // An event_start in the future (should survive).
         store
-            .insert_calendar_dispatch("t1", "e2", "2099-01-01T00:00:00Z", "scheduled", "2099-01-01T00:00:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e2",
+                "2099-01-01T00:00:00Z",
+                "scheduled",
+                "2099-01-01T00:00:00Z",
+            )
             .await
             .unwrap();
 
         store.prune_old_calendar_dispatches().await.unwrap();
 
-        assert!(!store.dispatch_exists("t1", "e1", "2020-01-01T00:00:00Z").await.unwrap(), "old row should be pruned");
-        assert!(store.dispatch_exists("t1", "e2", "2099-01-01T00:00:00Z").await.unwrap(), "future row should survive");
+        assert!(
+            !store
+                .dispatch_exists("t1", "e1", "2020-01-01T00:00:00Z")
+                .await
+                .unwrap(),
+            "old row should be pruned"
+        );
+        assert!(
+            store
+                .dispatch_exists("t1", "e2", "2099-01-01T00:00:00Z")
+                .await
+                .unwrap(),
+            "future row should survive"
+        );
     }
 
     #[tokio::test]
     async fn test_list_pending_dispatches_ordering() {
         let store = test_store().await;
         store
-            .insert_calendar_dispatch("t1", "e2", "2026-05-02T10:00:00Z", "scheduled", "2026-05-02T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e2",
+                "2026-05-02T10:00:00Z",
+                "scheduled",
+                "2026-05-02T09:55:00Z",
+            )
             .await
             .unwrap();
         store
-            .insert_calendar_dispatch("t1", "e1", "2026-05-01T10:00:00Z", "scheduled", "2026-05-01T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e1",
+                "2026-05-01T10:00:00Z",
+                "scheduled",
+                "2026-05-01T09:55:00Z",
+            )
             .await
             .unwrap();
         // A dispatched row — should not appear in the list.
         store
-            .insert_calendar_dispatch("t1", "e3", "2026-05-03T10:00:00Z", "dispatched", "2026-05-03T09:55:00Z")
+            .insert_calendar_dispatch(
+                "t1",
+                "e3",
+                "2026-05-03T10:00:00Z",
+                "dispatched",
+                "2026-05-03T09:55:00Z",
+            )
             .await
             .unwrap();
 
@@ -708,7 +868,11 @@ mod health_tests {
 
     impl MockBridge {
         fn new(status: CalendarAccessStatus, calendars: Vec<CalendarInfo>) -> Self {
-            Self { status, calendars, calls: Mutex::new(Vec::new()) }
+            Self {
+                status,
+                calendars,
+                calls: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -724,7 +888,9 @@ mod health_tests {
                 last_input_at_unix_millis: None,
             }
         }
-        fn get_calendar_access_status(&self) -> Result<CalendarAccessStatus, crate::error::TaktError> {
+        fn get_calendar_access_status(
+            &self,
+        ) -> Result<CalendarAccessStatus, crate::error::TaktError> {
             self.calls.lock().unwrap().push("get_status");
             Ok(self.status.clone())
         }
@@ -735,10 +901,20 @@ mod health_tests {
             self.calls.lock().unwrap().push("list_calendars");
             Ok(self.calendars.clone())
         }
-        fn fetch_events_in_window(&self, _: String, _: u32, _: u32) -> Result<Vec<CalendarEvent>, crate::error::TaktError> {
+        fn fetch_events_in_window(
+            &self,
+            _: String,
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<CalendarEvent>, crate::error::TaktError> {
             Ok(vec![])
         }
-        fn fetch_event_instance(&self, _: String, _: String, _: String) -> Result<Option<CalendarEvent>, crate::error::TaktError> {
+        fn fetch_event_instance(
+            &self,
+            _: String,
+            _: String,
+            _: String,
+        ) -> Result<Option<CalendarEvent>, crate::error::TaktError> {
             Ok(None)
         }
     }
@@ -752,7 +928,9 @@ mod health_tests {
             run_if_missed: false,
             notify_on_run: false,
             schedule,
-            action: Action::Settings { pane_url: "x".into() },
+            action: Action::Settings {
+                pane_url: "x".into(),
+            },
             created_at: "".into(),
             updated_at: "".into(),
             last_run_at: None,
@@ -781,7 +959,9 @@ mod health_tests {
     fn non_calendar_task_stays_healthy_and_no_bridge_calls() {
         let bridge = Arc::new(MockBridge::new(CalendarAccessStatus::Authorized, vec![]));
         let (store, _rt) = store_with(Arc::clone(&bridge));
-        let mut tasks = vec![make_dto(Schedule::Cron { expression: "0 * * * *".into() })];
+        let mut tasks = vec![make_dto(Schedule::Cron {
+            expression: "0 * * * *".into(),
+        })];
         store.populate_health(&mut tasks);
         assert_eq!(tasks[0].health, TaskHealth::Healthy);
         assert!(bridge.calls.lock().unwrap().is_empty());
@@ -819,7 +999,12 @@ mod health_tests {
     fn calendar_task_healthy_when_calendar_present() {
         let bridge = Arc::new(MockBridge::new(
             CalendarAccessStatus::Authorized,
-            vec![CalendarInfo { id: "cal-1".into(), title: "Work".into(), source: "Google".into(), color_hex: None }],
+            vec![CalendarInfo {
+                id: "cal-1".into(),
+                title: "Work".into(),
+                source: "Google".into(),
+                color_hex: None,
+            }],
         ));
         let (store, _rt) = store_with(Arc::clone(&bridge));
         let mut tasks = vec![make_dto(Schedule::Calendar {
@@ -829,14 +1014,22 @@ mod health_tests {
         })];
         store.populate_health(&mut tasks);
         assert_eq!(tasks[0].health, TaskHealth::Healthy);
-        assert_eq!(bridge.calls.lock().unwrap().as_slice(), &["get_status", "list_calendars"]);
+        assert_eq!(
+            bridge.calls.lock().unwrap().as_slice(),
+            &["get_status", "list_calendars"]
+        );
     }
 
     #[test]
     fn calendar_task_not_found_when_calendar_missing() {
         let bridge = Arc::new(MockBridge::new(
             CalendarAccessStatus::Authorized,
-            vec![CalendarInfo { id: "cal-other".into(), title: "Other".into(), source: "Local".into(), color_hex: None }],
+            vec![CalendarInfo {
+                id: "cal-other".into(),
+                title: "Other".into(),
+                source: "Local".into(),
+                color_hex: None,
+            }],
         ));
         let (store, _rt) = store_with(Arc::clone(&bridge));
         let mut tasks = vec![make_dto(Schedule::Calendar {
@@ -852,18 +1045,38 @@ mod health_tests {
     fn multiple_calendar_tasks_share_two_bridge_calls() {
         let bridge = Arc::new(MockBridge::new(
             CalendarAccessStatus::Authorized,
-            vec![CalendarInfo { id: "cal-1".into(), title: "Work".into(), source: "Google".into(), color_hex: None }],
+            vec![CalendarInfo {
+                id: "cal-1".into(),
+                title: "Work".into(),
+                source: "Google".into(),
+                color_hex: None,
+            }],
         ));
         let (store, _rt) = store_with(Arc::clone(&bridge));
         let mut tasks = vec![
-            make_dto(Schedule::Calendar { calendar_id: "cal-1".into(), title_contains: None, minutes_before: 5 }),
-            make_dto(Schedule::Calendar { calendar_id: "cal-1".into(), title_contains: None, minutes_before: 10 }),
-            make_dto(Schedule::Calendar { calendar_id: "cal-missing".into(), title_contains: None, minutes_before: 0 }),
+            make_dto(Schedule::Calendar {
+                calendar_id: "cal-1".into(),
+                title_contains: None,
+                minutes_before: 5,
+            }),
+            make_dto(Schedule::Calendar {
+                calendar_id: "cal-1".into(),
+                title_contains: None,
+                minutes_before: 10,
+            }),
+            make_dto(Schedule::Calendar {
+                calendar_id: "cal-missing".into(),
+                title_contains: None,
+                minutes_before: 0,
+            }),
         ];
         store.populate_health(&mut tasks);
         assert_eq!(tasks[0].health, TaskHealth::Healthy);
         assert_eq!(tasks[1].health, TaskHealth::Healthy);
         assert_eq!(tasks[2].health, TaskHealth::CalendarNotFound);
-        assert_eq!(bridge.calls.lock().unwrap().as_slice(), &["get_status", "list_calendars"]);
+        assert_eq!(
+            bridge.calls.lock().unwrap().as_slice(),
+            &["get_status", "list_calendars"]
+        );
     }
 }

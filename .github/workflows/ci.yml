@@ -16,6 +16,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: aarch64-apple-darwin
 
       - name: Rust format check
         run: cargo fmt -- --check
@@ -25,3 +26,9 @@ jobs:
 
       - name: Rust tests
         run: cargo test
+
+      - name: Swift regression tests
+        run: make test-swift
+
+      - name: macOS arm64 build
+        run: make build-ci

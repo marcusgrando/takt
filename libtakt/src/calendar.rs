@@ -39,7 +39,6 @@ pub struct CalendarPoller {
     executor: Arc<dyn ActionExecutor>,
     bridge: Arc<dyn PlatformBridge>,
     cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
-    stop: CancellationToken,
 }
 
 impl CalendarPoller {
@@ -54,12 +53,7 @@ impl CalendarPoller {
             executor,
             bridge,
             cancel_tokens,
-            stop: CancellationToken::new(),
         }
-    }
-
-    pub fn stop(&self) {
-        self.stop.cancel();
     }
 
     pub async fn run(self: Arc<Self>) {
@@ -72,13 +66,9 @@ impl CalendarPoller {
             eprintln!("[takt] calendar poller initial tick error: {}", e);
         }
         loop {
-            tokio::select! {
-                _ = self.stop.cancelled() => break,
-                _ = tokio::time::sleep(std::time::Duration::from_secs(CALENDAR_POLL_INTERVAL_SECS)) => {
-                    if let Err(e) = self.tick().await {
-                        eprintln!("[takt] calendar poller tick error: {}", e);
-                    }
-                }
+            tokio::time::sleep(std::time::Duration::from_secs(CALENDAR_POLL_INTERVAL_SECS)).await;
+            if let Err(e) = self.tick().await {
+                eprintln!("[takt] calendar poller tick error: {}", e);
             }
         }
     }
@@ -98,7 +88,10 @@ impl CalendarPoller {
         let mut by_calendar: HashMap<String, Vec<TaskDto>> = HashMap::new();
         for t in calendar_tasks {
             if let Schedule::Calendar { calendar_id, .. } = &t.schedule {
-                by_calendar.entry(calendar_id.clone()).or_default().push(t.clone());
+                by_calendar
+                    .entry(calendar_id.clone())
+                    .or_default()
+                    .push(t.clone());
             }
         }
 
@@ -142,7 +135,12 @@ impl CalendarPoller {
                             continue;
                         }
                     }
-                    self.process_slot(task, event, minutes_before).await;
+                    if let Err(error) = self.process_slot(task, event, minutes_before).await {
+                        eprintln!(
+                            "[takt] reserve calendar dispatch for {}: {}",
+                            task.id, error
+                        );
+                    }
                 }
             }
         }
@@ -151,27 +149,32 @@ impl CalendarPoller {
         Ok(())
     }
 
-    async fn process_slot(&self, task: &TaskDto, event: &CalendarEvent, minutes_before: u32) {
+    async fn process_slot(
+        &self,
+        task: &TaskDto,
+        event: &CalendarEvent,
+        minutes_before: u32,
+    ) -> anyhow::Result<()> {
         let event_start = match DateTime::parse_from_rfc3339(&event.start) {
             Ok(dt) => dt.with_timezone(&Utc),
-            Err(_) => return,
+            Err(_) => return Ok(()),
         };
         let trigger_at = event_start - Duration::minutes(minutes_before as i64);
         let now = Utc::now();
         let d = (trigger_at - now).num_seconds();
 
         // Skip if already known.
-        if let Ok(true) = self
+        if self
             .store
             .dispatch_exists(&task.id, &event.id, &event.start)
-            .await
+            .await?
         {
-            return;
+            return Ok(());
         }
 
         // Skip if the trigger is past the next poll window — next tick will handle it.
         if d > CALENDAR_POLL_INTERVAL_SECS as i64 {
-            return;
+            return Ok(());
         }
 
         let trigger_at_iso = trigger_at.to_rfc3339();
@@ -180,7 +183,7 @@ impl CalendarPoller {
             // Missed slot.
             if task.run_if_missed {
                 // Reserve as scheduled, then dispatch immediately.
-                let _ = self
+                if !self
                     .store
                     .insert_calendar_dispatch(
                         &task.id,
@@ -189,12 +192,15 @@ impl CalendarPoller {
                         "scheduled",
                         &trigger_at_iso,
                     )
-                    .await;
+                    .await?
+                {
+                    return Ok(());
+                }
                 self.spawn_dispatch(task.id.clone(), event.id.clone(), event.start.clone(), 0)
                     .await;
             } else {
                 // Consume the slot without running.
-                let _ = self
+                if !self
                     .store
                     .insert_calendar_dispatch(
                         &task.id,
@@ -203,7 +209,10 @@ impl CalendarPoller {
                         "dispatched",
                         &trigger_at_iso,
                     )
-                    .await;
+                    .await?
+                {
+                    return Ok(());
+                }
                 let _ = self
                     .store
                     .log_execution(
@@ -215,11 +224,11 @@ impl CalendarPoller {
                     )
                     .await;
             }
-            return;
+            return Ok(());
         }
 
         // Reserve and schedule a sleep until trigger_at (possibly zero seconds).
-        let _ = self
+        if !self
             .store
             .insert_calendar_dispatch(
                 &task.id,
@@ -228,7 +237,10 @@ impl CalendarPoller {
                 "scheduled",
                 &trigger_at_iso,
             )
-            .await;
+            .await?
+        {
+            return Ok(());
+        }
         let delay_secs = d.max(0) as u64;
         self.spawn_dispatch(
             task.id.clone(),
@@ -237,9 +249,10 @@ impl CalendarPoller {
             delay_secs,
         )
         .await;
+        Ok(())
     }
 
-    async fn spawn_dispatch(
+    pub(crate) async fn spawn_dispatch(
         &self,
         task_id: String,
         event_id: String,
@@ -248,8 +261,13 @@ impl CalendarPoller {
     ) {
         let key = dispatch_token_key(&task_id, &event_id, &event_start);
         let token = CancellationToken::new();
-        let child = token.child_token();
-        self.cancel_tokens.lock().await.insert(key.clone(), token);
+        {
+            let mut tokens = self.cancel_tokens.lock().await;
+            if tokens.contains_key(&key) {
+                return;
+            }
+            tokens.insert(key.clone(), token.clone());
+        }
 
         let store = Arc::clone(&self.store);
         let executor = Arc::clone(&self.executor);
@@ -258,27 +276,48 @@ impl CalendarPoller {
 
         tokio::spawn(async move {
             tokio::select! {
-                _ = child.cancelled() => {
-                    cancel_tokens.lock().await.remove(&key);
-                    return;
-                }
+                biased;
+                _ = token.cancelled() => return,
                 _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs)) => {}
             }
-            run_dispatch_pub(
+            run_dispatch(
                 store,
                 executor,
                 bridge,
                 task_id,
                 event_id,
                 event_start,
+                token.clone(),
             )
             .await;
-            cancel_tokens.lock().await.remove(&key);
+            let mut tokens = cancel_tokens.lock().await;
+            // Removal cancels the old token before allowing a replacement.
+            if !token.is_cancelled() {
+                tokens.remove(&key);
+            }
         });
     }
 }
 
 // ── Fire-time dispatch ────────────────────────────────────────────────
+
+async fn claim_dispatch(
+    store: &TaskStore,
+    task_id: &str,
+    event_id: &str,
+    event_start: &str,
+) -> bool {
+    match store
+        .mark_calendar_dispatch_dispatched(task_id, event_id, event_start)
+        .await
+    {
+        Ok(claimed) => claimed,
+        Err(error) => {
+            eprintln!("[takt] claim calendar dispatch for {}: {}", task_id, error);
+            false
+        }
+    }
+}
 
 pub async fn run_dispatch_pub(
     store: Arc<TaskStore>,
@@ -288,6 +327,30 @@ pub async fn run_dispatch_pub(
     event_id: String,
     event_start: String,
 ) {
+    run_dispatch(
+        store,
+        executor,
+        bridge,
+        task_id,
+        event_id,
+        event_start,
+        CancellationToken::new(),
+    )
+    .await;
+}
+
+async fn run_dispatch(
+    store: Arc<TaskStore>,
+    executor: Arc<dyn ActionExecutor>,
+    bridge: Arc<dyn PlatformBridge>,
+    task_id: String,
+    event_id: String,
+    event_start: String,
+    cancellation: CancellationToken,
+) {
+    if cancellation.is_cancelled() {
+        return;
+    }
     // 1. Re-read the task.
     let task = match store.get_task(&task_id).await {
         Ok(Some(t)) if t.enabled => t,
@@ -316,12 +379,12 @@ pub async fn run_dispatch_pub(
         }
     };
 
-    let (calendar_id, minutes_before) = match &task.schedule {
+    let (calendar_id, minutes_before, title_contains) = match &task.schedule {
         Schedule::Calendar {
             calendar_id,
             minutes_before,
-            ..
-        } => (calendar_id.clone(), *minutes_before),
+            title_contains,
+        } => (calendar_id.clone(), *minutes_before, title_contains),
         _ => {
             // Schedule was edited to a non-calendar type between reservation and fire.
             let _ = store
@@ -340,9 +403,9 @@ pub async fn run_dispatch_pub(
         Ok(Some(e)) if e.calendar_id == calendar_id => e,
         Ok(_) => {
             // Event cancelled, deleted, or moved to a different calendar.
-            let _ = store
-                .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
-                .await;
+            if !claim_dispatch(&store, &task_id, &event_id, &event_start).await {
+                return;
+            }
             let _ = store
                 .log_execution(
                     &task.id,
@@ -363,13 +426,29 @@ pub async fn run_dispatch_pub(
         }
     };
 
+    if title_contains
+        .as_ref()
+        .is_some_and(|needle| !fresh.title.to_lowercase().contains(&needle.to_lowercase()))
+    {
+        if claim_dispatch(&store, &task_id, &event_id, &event_start).await {
+            let _ = store
+                .log_execution(
+                    &task_id,
+                    "skipped",
+                    None,
+                    None,
+                    Some("event title no longer matches".into()),
+                )
+                .await;
+        }
+        return;
+    }
+
     // 3. Branch on the fresh delta.
     let fresh_start = match DateTime::parse_from_rfc3339(&fresh.start) {
         Ok(dt) => dt.with_timezone(&Utc),
         Err(_) => {
-            let _ = store
-                .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
-                .await;
+            claim_dispatch(&store, &task_id, &event_id, &event_start).await;
             return;
         }
     };
@@ -387,9 +466,19 @@ pub async fn run_dispatch_pub(
 
     if d > DISPATCH_TOLERANCE_SECS {
         // Small shift forward — sleep the remainder then re-run dispatch with the latest event.
-        tokio::time::sleep(std::time::Duration::from_secs(d as u64)).await;
-        Box::pin(run_dispatch_pub(
-            store, executor, bridge, task_id, event_id, event_start,
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(d as u64)) => {}
+        }
+        Box::pin(run_dispatch(
+            store,
+            executor,
+            bridge,
+            task_id,
+            event_id,
+            event_start,
+            cancellation,
         ))
         .await;
         return;
@@ -397,9 +486,9 @@ pub async fn run_dispatch_pub(
 
     if d < -DISPATCH_TOLERANCE_SECS && !task.run_if_missed {
         // New trigger is in the past and the task does not want catch-up.
-        let _ = store
-            .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
-            .await;
+        if !claim_dispatch(&store, &task_id, &event_id, &event_start).await {
+            return;
+        }
         let _ = store
             .log_execution(
                 &task.id,
@@ -413,18 +502,13 @@ pub async fn run_dispatch_pub(
     }
 
     // 4. Mark as dispatched BEFORE executing so concurrent poll ticks see us.
-    let _ = store
-        .mark_calendar_dispatch_dispatched(&task_id, &event_id, &event_start)
-        .await;
+    if cancellation.is_cancelled() {
+        return;
+    }
+    if !claim_dispatch(&store, &task_id, &event_id, &event_start).await {
+        return;
+    }
 
-    // 5. Delegate to the shared execution pipeline. This is the only path
-    //    that calls the executor, writes execution_logs, updates last_run_at
-    //    and next_run_at, and fires notify-on-run — matching Cron/OneShot/
-    //    DailyFirstUse semantics exactly. The Option<&CalendarEvent> argument
-    //    (added in Task 3) carries the fresh event so the executor can use it
-    //    for OpenEventLinks and template variable substitution, and so the
-    //    "Triggered by event: ..." traceability line gets prepended to stdout
-    //    inside execute_and_log.
     let _ = crate::scheduler::execute_and_log(
         &*executor,
         &store,
@@ -438,6 +522,10 @@ pub async fn run_dispatch_pub(
     )
     .await;
 }
+
+#[cfg(test)]
+#[path = "calendar_startup_tests.rs"]
+mod startup_tests;
 
 #[cfg(test)]
 mod tests {

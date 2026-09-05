@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UserNotifications
 
@@ -140,11 +141,10 @@ enum ActionTemplate: String, Codable, Hashable, CaseIterable {
     }
 }
 
-@Observable
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    var vm: TaskListViewModel?
-    var core: TaktCore?
-    var editorParams: EditorParams?
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    @Published var vm: TaskListViewModel?
+    @Published var core: TaktCore?
+    @Published var editorParams: EditorParams?
     private var appToReactivate: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -178,7 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dismissPopover() {
         for window in NSApp.windows {
             // The MenuBarExtra panel holds a reference to its status item button
-            guard let statusItem = window.value(forKey: "statusItem") as? NSStatusItem,
+            guard window.responds(to: NSSelectorFromString("statusItem")),
+                  let statusItem = window.value(forKey: "statusItem") as? NSStatusItem,
                   let button = statusItem.button else { continue }
             button.performClick(nil)
             return
@@ -212,7 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //    SwiftUI Window scenes can leave hidden NSWindows that prevent
         //    macOS from honoring the activation policy change.
         for window in NSApp.windows {
-            if window.value(forKey: "statusItem") is NSStatusItem { continue }
+            if window.responds(to: NSSelectorFromString("statusItem")),
+               window.value(forKey: "statusItem") is NSStatusItem { continue }
             if window.isVisible { window.orderOut(nil) }
         }
 

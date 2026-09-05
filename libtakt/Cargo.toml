@@ -36,3 +36,6 @@ core-graphics = "0.25"
 
 [build-dependencies]
 uniffi = { version = "0.31", features = ["build"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

@@ -361,7 +361,19 @@ struct ActionBuilderView: View {
                 }
 
                 if isCalendarSchedule {
-                    templateVarHint
+                    Group {
+                        switch shell {
+                        case .sh, .bash, .zsh:
+                            Text("Read calendar values from environment variables, for example: \"$TAKT_EVENT_TITLE\".")
+                        case .python:
+                            Text("Read calendar values from environment variables, for example: os.environ[\"TAKT_EVENT_TITLE\"] (import os).")
+                        case .appleScript:
+                            Text("Read calendar values from environment variables, for example: system attribute \"TAKT_EVENT_TITLE\".")
+                        }
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .italic()
                 }
             }
         }

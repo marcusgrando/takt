@@ -15,8 +15,19 @@ help: ## Show this help message
 # ─── Development ───────────────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run Rust unit tests
+test: test-rust test-swift ## Run Rust and Swift tests
+
+.PHONY: test-rust
+test-rust: ## Run Rust unit tests
 	cargo test --package libtakt
+
+.PHONY: test-swift
+test-swift: ## Run standalone Swift regression tests
+	bash scripts/test-swift.sh
+
+.PHONY: build-ci
+build-ci: ## Build the arm64 macOS app without code signing
+	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug -derivedDataPath "$(BUILD_DIR)" -destination 'generic/platform=macOS' ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 
 .PHONY: build-rust
 build-rust: ## Build Rust static lib + generate Swift bindings

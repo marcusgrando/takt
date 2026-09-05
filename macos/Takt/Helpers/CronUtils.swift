@@ -151,8 +151,7 @@ func parseCron(_ expression: String) -> RecurringState {
     // Weekly: M H * * 0,1,3
     if domField == "*" && dowField != "*" && !dowField.contains("#") && !dowField.contains("L") {
         if let min = Int(minField), let hour = Int(hourField), monField == "*" {
-            let weekdays = dowField.split(separator: ",").compactMap { Int($0) }
-            if !weekdays.isEmpty {
+            if let weekdays = parseIntegerList(dowField, allowed: 0...6) {
                 var s = defaultRecurring
                 s.frequency = .weekly
                 s.hour = hour
@@ -166,8 +165,7 @@ func parseCron(_ expression: String) -> RecurringState {
     // Monthly "each": M H 1,15 * *
     if domField != "*" && !domField.contains("/") && dowField == "*" && monField == "*" {
         if let min = Int(minField), let hour = Int(hourField) {
-            let monthDays = domField.split(separator: ",").compactMap { Int($0) }.filter { $0 >= 1 && $0 <= 31 }
-            if !monthDays.isEmpty {
+            if let monthDays = parseIntegerList(domField, allowed: 1...31) {
                 var s = defaultRecurring
                 s.frequency = .monthly
                 s.hour = hour
@@ -221,6 +219,15 @@ func parseCron(_ expression: String) -> RecurringState {
 }
 
 // MARK: - Helpers
+
+private func parseIntegerList(_ field: String, allowed: ClosedRange<Int>) -> [Int]? {
+    var values: [Int] = []
+    for part in field.split(separator: ",", omittingEmptySubsequences: false) {
+        guard let value = Int(part), allowed.contains(value) else { return nil }
+        values.append(value)
+    }
+    return values.isEmpty ? nil : values
+}
 
 private func parseStepInterval(_ field: String) -> Int? {
     if field == "*" { return 1 }

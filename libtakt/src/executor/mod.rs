@@ -37,6 +37,9 @@ pub trait ActionExecutor: Send + Sync {
 pub mod macos;
 
 #[cfg(target_os = "macos")]
+mod process;
+
+#[cfg(target_os = "macos")]
 pub mod keymap;
 
 #[cfg(target_os = "macos")]

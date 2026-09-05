@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub fn launch_agent_path() -> Option<PathBuf> {
@@ -37,27 +38,78 @@ pub fn plist_content(app_path: &Path) -> String {
     <false/>
 </dict>
 </plist>"#,
-        xml_escape(&app_path.display().to_string())
+        xml_escape(&app_path.join("Contents/MacOS/Takt").display().to_string())
     )
 }
 
 pub fn ensure_registered() {
-    // Only register if running as a bundled .app
+    // launchd reads this registration at login without launching another instance now.
     let Some(app_path) = app_bundle_path() else {
         return;
     };
     let Some(plist_path) = launch_agent_path() else {
         return;
     };
-    if plist_path.exists() {
-        return;
-    } // already registered
-    if let Some(parent) = plist_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Err(error) = write_registration(&plist_path, &app_path) {
+        eprintln!("[takt] failed to register launch at login: {}", error);
     }
-    if std::fs::write(&plist_path, plist_content(&app_path)).is_ok() {
-        let _ = std::process::Command::new("launchctl")
-            .args(["load", plist_path.to_str().unwrap_or_default()])
-            .status();
+}
+
+fn write_registration(plist_path: &Path, app_path: &Path) -> std::io::Result<bool> {
+    let contents = plist_content(app_path);
+    if std::fs::read_to_string(plist_path).ok().as_deref() == Some(&contents) {
+        return Ok(false);
+    }
+    if let Some(parent) = plist_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary_path = plist_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temporary_path, plist_path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    result?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registration_launches_bundle_executable() {
+        let plist = plist_content(Path::new("/Applications/Takt.app"));
+        assert!(plist.contains("<string>/Applications/Takt.app/Contents/MacOS/Takt</string>"));
+    }
+
+    #[test]
+    fn registration_escapes_executable_path() {
+        let plist = plist_content(Path::new("/Applications/Work & Tools/Takt.app"));
+        assert!(plist.contains(
+            "<string>/Applications/Work &amp; Tools/Takt.app/Contents/MacOS/Takt</string>"
+        ));
+    }
+
+    #[test]
+    fn registration_replaces_stale_bundle_and_preserves_current_file() {
+        let dir = std::env::temp_dir().join(format!("takt-launch-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plist = dir.join("app.takt.plist");
+        std::fs::write(&plist, plist_content(Path::new("/old/Takt.app"))).unwrap();
+        let updated = write_registration(&plist, Path::new("/Applications/Takt.app")).unwrap();
+        let contents = std::fs::read_to_string(&plist).unwrap();
+        let unchanged = write_registration(&plist, Path::new("/Applications/Takt.app")).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(updated);
+        assert!(!unchanged);
+        assert!(contents.contains("/Applications/Takt.app/Contents/MacOS/Takt"));
     }
 }

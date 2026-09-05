@@ -185,7 +185,12 @@ pub enum Action {
 impl Serialize for Action {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Action::OpenFile { path, app, post_shortcuts, shortcut_delay_secs } => {
+            Action::OpenFile {
+                path,
+                app,
+                post_shortcuts,
+                shortcut_delay_secs,
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "OpenFile")?;
                 map.serialize_entry("path", path)?;
@@ -194,7 +199,12 @@ impl Serialize for Action {
                 map.serialize_entry("shortcut_delay_secs", shortcut_delay_secs)?;
                 map.end()
             }
-            Action::OpenUrl { urls, browser, post_shortcuts, shortcut_delay_secs } => {
+            Action::OpenUrl {
+                urls,
+                browser,
+                post_shortcuts,
+                shortcut_delay_secs,
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "OpenUrl")?;
                 map.serialize_entry("urls", urls)?;
@@ -203,7 +213,11 @@ impl Serialize for Action {
                 map.serialize_entry("shortcut_delay_secs", shortcut_delay_secs)?;
                 map.end()
             }
-            Action::OpenApp { app_path, post_shortcuts, shortcut_delay_secs } => {
+            Action::OpenApp {
+                app_path,
+                post_shortcuts,
+                shortcut_delay_secs,
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "OpenApp")?;
                 map.serialize_entry("app_path", app_path)?;
@@ -211,7 +225,11 @@ impl Serialize for Action {
                 map.serialize_entry("shortcut_delay_secs", shortcut_delay_secs)?;
                 map.end()
             }
-            Action::RunCommand { command, args, shell } => {
+            Action::RunCommand {
+                command,
+                args,
+                shell,
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "RunCommand")?;
                 map.serialize_entry("command", command)?;
@@ -227,7 +245,12 @@ impl Serialize for Action {
                 map.serialize_entry("sound", sound)?;
                 map.end()
             }
-            Action::Webhook { url, method, headers, body } => {
+            Action::Webhook {
+                url,
+                method,
+                headers,
+                body,
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "Webhook")?;
                 map.serialize_entry("url", url)?;
@@ -242,7 +265,11 @@ impl Serialize for Action {
                 map.serialize_entry("pane_url", pane_url)?;
                 map.end()
             }
-            Action::OpenEventLinks { open_conference, open_notes_links, browser } => {
+            Action::OpenEventLinks {
+                open_conference,
+                open_notes_links,
+                browser,
+            } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "OpenEventLinks")?;
                 map.serialize_entry("open_conference", open_conference)?;
@@ -257,20 +284,37 @@ impl Serialize for Action {
 impl<'de> Deserialize<'de> for Action {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let obj = value.as_object().ok_or_else(|| de::Error::custom("expected object"))?;
-        let action_type = obj.get("type").and_then(|v| v.as_str()).ok_or_else(|| de::Error::missing_field("type"))?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| de::Error::custom("expected object"))?;
+        let action_type = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| de::Error::missing_field("type"))?;
 
         match action_type {
             "OpenFile" => Ok(Action::OpenFile {
-                path: obj.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                path: obj
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 app: obj.get("app").and_then(|v| v.as_str()).map(String::from),
-                post_shortcuts: obj.get("post_shortcuts").map(|v| serde_json::from_value(v.clone()).unwrap_or_default()).unwrap_or_default(),
-                shortcut_delay_secs: obj.get("shortcut_delay_secs").and_then(|v| v.as_u64()).unwrap_or_else(default_shortcut_delay),
+                post_shortcuts: obj
+                    .get("post_shortcuts")
+                    .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+                    .unwrap_or_default(),
+                shortcut_delay_secs: obj
+                    .get("shortcut_delay_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_else(default_shortcut_delay),
             }),
             "OpenUrl" => {
                 // Backward compat: accept "url" (string) or "urls" (array)
                 let urls = if let Some(arr) = obj.get("urls").and_then(|v| v.as_array()) {
-                    arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
                 } else if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
                     vec![url.to_string()]
                 } else {
@@ -278,41 +322,113 @@ impl<'de> Deserialize<'de> for Action {
                 };
                 Ok(Action::OpenUrl {
                     urls,
-                    browser: obj.get("browser").and_then(|v| v.as_str()).map(String::from),
-                    post_shortcuts: obj.get("post_shortcuts").map(|v| serde_json::from_value(v.clone()).unwrap_or_default()).unwrap_or_default(),
-                    shortcut_delay_secs: obj.get("shortcut_delay_secs").and_then(|v| v.as_u64()).unwrap_or_else(default_shortcut_delay),
+                    browser: obj
+                        .get("browser")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    post_shortcuts: obj
+                        .get("post_shortcuts")
+                        .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+                        .unwrap_or_default(),
+                    shortcut_delay_secs: obj
+                        .get("shortcut_delay_secs")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or_else(default_shortcut_delay),
                 })
             }
             "OpenApp" => Ok(Action::OpenApp {
-                app_path: obj.get("app_path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                post_shortcuts: obj.get("post_shortcuts").map(|v| serde_json::from_value(v.clone()).unwrap_or_default()).unwrap_or_default(),
-                shortcut_delay_secs: obj.get("shortcut_delay_secs").and_then(|v| v.as_u64()).unwrap_or_else(default_shortcut_delay),
+                app_path: obj
+                    .get("app_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                post_shortcuts: obj
+                    .get("post_shortcuts")
+                    .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+                    .unwrap_or_default(),
+                shortcut_delay_secs: obj
+                    .get("shortcut_delay_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_else(default_shortcut_delay),
             }),
             "RunCommand" => Ok(Action::RunCommand {
-                command: obj.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                args: obj.get("args").map(|v| serde_json::from_value(v.clone()).unwrap_or_default()).unwrap_or_default(),
-                shell: obj.get("shell").map(|v| serde_json::from_value(v.clone()).unwrap_or(Shell::Zsh)).unwrap_or(Shell::Zsh),
+                command: obj
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                args: obj
+                    .get("args")
+                    .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+                    .unwrap_or_default(),
+                shell: obj
+                    .get("shell")
+                    .map(|v| serde_json::from_value(v.clone()).unwrap_or(Shell::Zsh))
+                    .unwrap_or(Shell::Zsh),
             }),
             "Notify" => Ok(Action::Notify {
-                title: obj.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                body: obj.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                title: obj
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                body: obj
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 sound: obj.get("sound").and_then(|v| v.as_bool()).unwrap_or(false),
             }),
             "Webhook" => Ok(Action::Webhook {
-                url: obj.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                method: obj.get("method").map(|v| serde_json::from_value(v.clone()).unwrap_or(HttpMethod::GET)).unwrap_or(HttpMethod::GET),
-                headers: obj.get("headers").map(|v| serde_json::from_value(v.clone()).unwrap_or_default()).unwrap_or_default(),
+                url: obj
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                method: obj
+                    .get("method")
+                    .map(|v| serde_json::from_value(v.clone()).unwrap_or(HttpMethod::GET))
+                    .unwrap_or(HttpMethod::GET),
+                headers: obj
+                    .get("headers")
+                    .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+                    .unwrap_or_default(),
                 body: obj.get("body").and_then(|v| v.as_str()).map(String::from),
             }),
             "Settings" => Ok(Action::Settings {
-                pane_url: obj.get("pane_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                pane_url: obj
+                    .get("pane_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             }),
             "OpenEventLinks" => Ok(Action::OpenEventLinks {
-                open_conference: obj.get("open_conference").and_then(|v| v.as_bool()).unwrap_or(true),
-                open_notes_links: obj.get("open_notes_links").and_then(|v| v.as_bool()).unwrap_or(true),
-                browser: obj.get("browser").and_then(|v| v.as_str()).map(String::from),
+                open_conference: obj
+                    .get("open_conference")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                open_notes_links: obj
+                    .get("open_notes_links")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                browser: obj
+                    .get("browser")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
             }),
-            other => Err(de::Error::unknown_variant(other, &["OpenFile", "OpenUrl", "OpenApp", "RunCommand", "Notify", "Webhook", "Settings", "OpenEventLinks"])),
+            other => Err(de::Error::unknown_variant(
+                other,
+                &[
+                    "OpenFile",
+                    "OpenUrl",
+                    "OpenApp",
+                    "RunCommand",
+                    "Notify",
+                    "Webhook",
+                    "Settings",
+                    "OpenEventLinks",
+                ],
+            )),
         }
     }
 }

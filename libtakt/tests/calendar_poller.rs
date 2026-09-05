@@ -12,150 +12,67 @@ use libtakt::platform::PlatformBridge;
 use libtakt::store::TaskStore;
 use std::sync::{Arc, Mutex};
 
-// ── MockBridge ────────────────────────────────────────────────────────
-
-struct MockBridge {
-    access_status: Mutex<CalendarAccessStatus>,
-    calendars: Mutex<Vec<CalendarInfo>>,
-    events_in_window: Mutex<Vec<CalendarEvent>>,
-    event_instance: Mutex<Option<CalendarEvent>>,
-}
-
-impl MockBridge {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            access_status: Mutex::new(CalendarAccessStatus::Authorized),
-            calendars: Mutex::new(vec![]),
-            events_in_window: Mutex::new(vec![]),
-            event_instance: Mutex::new(None),
-        })
-    }
-
-    fn with_event_instance(self: Arc<Self>, event: CalendarEvent) -> Arc<Self> {
-        *self.event_instance.lock().unwrap() = Some(event);
-        self
-    }
-
-    fn with_no_event_instance(self: Arc<Self>) -> Arc<Self> {
-        *self.event_instance.lock().unwrap() = None;
-        self
-    }
-}
-
-impl PlatformBridge for MockBridge {
-    fn send_notification(&self, _: String, _: String, _: bool) {}
-    fn run_on_main_sync(&self, _: u64) {}
-    fn get_user_activity_snapshot(&self) -> UserActivitySnapshot {
-        UserActivitySnapshot {
-            session_active: true,
-            eligibility_generation: 0,
-            input_event_count: 0,
-            eligibility_input_event_count: 0,
-            last_input_at_unix_millis: None,
-        }
-    }
-    fn get_calendar_access_status(
-        &self,
-    ) -> Result<CalendarAccessStatus, libtakt::error::TaktError> {
-        Ok(self.access_status.lock().unwrap().clone())
-    }
-    fn request_calendar_access(
-        &self,
-    ) -> Result<CalendarAccessStatus, libtakt::error::TaktError> {
-        Ok(CalendarAccessStatus::Authorized)
-    }
-    fn list_calendars(
-        &self,
-    ) -> Result<Vec<CalendarInfo>, libtakt::error::TaktError> {
-        Ok(self.calendars.lock().unwrap().clone())
-    }
-    fn fetch_events_in_window(
-        &self,
-        _: String,
-        _: u32,
-        _: u32,
-    ) -> Result<Vec<CalendarEvent>, libtakt::error::TaktError> {
-        Ok(self.events_in_window.lock().unwrap().clone())
-    }
-    fn fetch_event_instance(
-        &self,
-        _: String,
-        _: String,
-        _: String,
-    ) -> Result<Option<CalendarEvent>, libtakt::error::TaktError> {
-        Ok(self.event_instance.lock().unwrap().clone())
-    }
-}
-
-// ── SpyExecutor ───────────────────────────────────────────────────────
-
-#[derive(Default, Clone)]
-struct SpyExecutor {
-    calls: Arc<Mutex<Vec<(Action, Option<CalendarEvent>)>>>,
-}
-
-#[async_trait::async_trait]
-impl ActionExecutor for SpyExecutor {
-    async fn execute(
-        &self,
-        action: &Action,
-        event: Option<&CalendarEvent>,
-    ) -> Result<ExecutionResult, ExecutorError> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((action.clone(), event.cloned()));
-        Ok(ExecutionResult {
-            stdout: None,
-            stderr: None,
-        })
-    }
-}
-
-// ── Fixtures ──────────────────────────────────────────────────────────
-
-async fn make_store(bridge: Arc<dyn PlatformBridge>) -> Arc<TaskStore> {
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect(":memory:")
+#[tokio::test]
+async fn concurrent_dispatches_execute_reserved_occurrence_once() {
+    let start = chrono::Utc::now().to_rfc3339();
+    let bridge = MockBridge::new().with_event_instance(sample_event("e", "cal", &start, "Meeting"));
+    let store = make_store(bridge.clone()).await;
+    let task = create_calendar_task(&store, "cal", true).await;
+    store
+        .insert_calendar_dispatch(&task, "e", &start, "scheduled", &start)
         .await
-        .expect("pool");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrate");
-    Arc::new(TaskStore::new(pool, bridge))
+        .unwrap();
+    let executor = Arc::new(SpyExecutor::default());
+    let dispatch = || {
+        calendar::run_dispatch_pub(
+            store.clone(),
+            executor.clone(),
+            bridge.clone(),
+            task.clone(),
+            "e".into(),
+            start.clone(),
+        )
+    };
+    tokio::join!(dispatch(), dispatch());
+    assert_eq!(executor.calls.lock().unwrap().len(), 1);
+    assert_eq!(store.list_logs(Some(&task), 10).await.unwrap().len(), 1);
 }
 
-fn sample_event(id: &str, calendar_id: &str, start_iso: &str, title: &str) -> CalendarEvent {
-    CalendarEvent {
-        id: id.into(),
-        title: title.into(),
-        start: start_iso.into(),
-        end: start_iso.into(),
-        notes: None,
-        location: None,
-        url: None,
-        conference_url: Some("https://meet.test/abc".into()),
-        calendar_id: calendar_id.into(),
-    }
+#[tokio::test]
+async fn dispatch_without_reservation_never_executes() {
+    let start = chrono::Utc::now().to_rfc3339();
+    let bridge = MockBridge::new().with_event_instance(sample_event("e", "cal", &start, "Meeting"));
+    let store = make_store(bridge.clone()).await;
+    let task = create_calendar_task(&store, "cal", true).await;
+    let executor = Arc::new(SpyExecutor::default());
+    calendar::run_dispatch_pub(
+        store.clone(),
+        executor.clone(),
+        bridge,
+        task.clone(),
+        "e".into(),
+        start,
+    )
+    .await;
+    assert!(executor.calls.lock().unwrap().is_empty());
+    assert!(store.list_logs(Some(&task), 10).await.unwrap().is_empty());
 }
 
-/// Create a Calendar-scheduled task in the store. Returns the auto-generated task ID.
-async fn create_calendar_task(
-    store: &Arc<TaskStore>,
-    calendar_id: &str,
-    run_if_missed: bool,
-) -> String {
+#[tokio::test]
+async fn dispatch_rechecks_title_filter() {
+    let start = chrono::Utc::now().to_rfc3339();
+    let bridge =
+        MockBridge::new().with_event_instance(sample_event("e", "cal", &start, "Personal"));
+    let store = make_store(bridge.clone()).await;
     let task = store
         .create_task(
-            "test-task".into(),
+            "filtered".into(),
             None,
-            run_if_missed,
+            true,
             false,
             Schedule::Calendar {
-                calendar_id: calendar_id.into(),
-                title_contains: None,
+                calendar_id: "cal".into(),
+                title_contains: Some("Standup".into()),
                 minutes_before: 0,
             },
             Action::Settings {
@@ -163,9 +80,114 @@ async fn create_calendar_task(
             },
         )
         .await
-        .expect("create_task");
-    task.id
+        .unwrap();
+    store
+        .insert_calendar_dispatch(&task.id, "e", &start, "scheduled", &start)
+        .await
+        .unwrap();
+    let executor = Arc::new(SpyExecutor::default());
+    calendar::run_dispatch_pub(
+        store.clone(),
+        executor.clone(),
+        bridge,
+        task.id.clone(),
+        "e".into(),
+        start,
+    )
+    .await;
+    assert!(executor.calls.lock().unwrap().is_empty());
+    assert_eq!(
+        store.list_logs(Some(&task.id), 10).await.unwrap()[0].status,
+        "skipped"
+    );
 }
+
+#[tokio::test]
+async fn cancellation_stops_fire_time_resleep_and_preserves_replacement() {
+    let start = chrono::Utc::now().to_rfc3339();
+    let shifted = (chrono::Utc::now() + chrono::Duration::seconds(4)).to_rfc3339();
+    let bridge =
+        MockBridge::new().with_event_instance(sample_event("e", "cal", &shifted, "Meeting"));
+    *bridge.events_in_window.lock().unwrap() = vec![sample_event("e", "cal", &start, "Meeting")];
+    let store = make_store(bridge.clone()).await;
+    let task = create_calendar_task(&store, "cal", true).await;
+    let executor = Arc::new(SpyExecutor::default());
+    let tokens = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+    let poller = Arc::new(calendar::CalendarPoller::new(
+        store.clone(),
+        executor.clone(),
+        bridge.clone(),
+        tokens.clone(),
+    ));
+    let runner = tokio::spawn(poller.run());
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        bridge.fetched_instance.notified(),
+    )
+    .await
+    .unwrap();
+    let key = calendar::dispatch_token_key(&task, "e", &start);
+    {
+        let mut tokens = tokens.lock().await;
+        tokens.remove(&key).unwrap().cancel();
+        tokens.insert(key.clone(), tokio_util::sync::CancellationToken::new());
+    }
+    *bridge.event_instance.lock().unwrap() = Some(sample_event("e", "cal", &start, "Meeting"));
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(4)).await;
+    tokio::time::resume();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    runner.abort();
+    assert!(executor.calls.lock().unwrap().is_empty());
+    assert!(tokens.lock().await.contains_key(&key));
+}
+
+#[tokio::test]
+async fn failed_reservation_does_not_spawn_or_log_a_dispatch() {
+    let start = (chrono::Utc::now() - chrono::Duration::seconds(30)).to_rfc3339();
+    let event = sample_event("e", "cal", &start, "Meeting");
+    let bridge = MockBridge::new().with_event_instance(event.clone());
+    *bridge.events_in_window.lock().unwrap() = vec![event];
+    let (store, pool) = make_store_with_pool(bridge.clone()).await;
+    let catch_up = create_calendar_task(&store, "cal", true).await;
+    let skipped = create_calendar_task(&store, "cal", false).await;
+    sqlx::query("CREATE TRIGGER reject_reservation BEFORE INSERT ON calendar_dispatches BEGIN SELECT RAISE(FAIL, 'storage unavailable'); END").execute(&pool).await.unwrap();
+    let executor = Arc::new(SpyExecutor::default());
+    let tokens = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+    let poller = Arc::new(calendar::CalendarPoller::new(
+        store.clone(),
+        executor.clone(),
+        bridge.clone(),
+        tokens.clone(),
+    ));
+    let runner = tokio::spawn(poller.run());
+    let fetched = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        bridge.fetched_instance.notified(),
+    )
+    .await;
+    runner.abort();
+    assert!(
+        fetched.is_err(),
+        "failed reservation must not create a timer"
+    );
+    assert!(tokens.lock().await.is_empty());
+    assert!(executor.calls.lock().unwrap().is_empty());
+    assert!(store
+        .list_logs(Some(&catch_up), 10)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .list_logs(Some(&skipped), 10)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[path = "support/calendar.rs"]
+mod support;
+use support::*;
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
@@ -214,7 +236,7 @@ async fn dispatch_uses_fresh_event_data() {
 /// Bridge returns None (event cancelled/deleted) → dispatch is skipped.
 #[tokio::test]
 async fn dispatch_skips_when_fresh_event_cancelled() {
-    let bridge = MockBridge::new().with_no_event_instance();
+    let bridge = MockBridge::new();
     let bridge: Arc<dyn PlatformBridge> = bridge;
     let store = make_store(Arc::clone(&bridge)).await;
     let task_id = create_calendar_task(&store, "cal-1", false).await;
@@ -242,14 +264,20 @@ async fn dispatch_skips_when_fresh_event_cancelled() {
     .await;
 
     let calls = executor.calls.lock().unwrap();
-    assert!(calls.is_empty(), "executor must not be called for cancelled event");
+    assert!(
+        calls.is_empty(),
+        "executor must not be called for cancelled event"
+    );
 
     // The row should have been marked dispatched (not remain scheduled).
     let exists = store
         .dispatch_exists(&task_id, "evt-1", "2026-04-12T09:00:00+00:00")
         .await
         .unwrap();
-    assert!(exists, "dispatch row should still exist (marked dispatched)");
+    assert!(
+        exists,
+        "dispatch row should still exist (marked dispatched)"
+    );
 
     // Confirm a 'skipped' execution log was written.
     let logs = store.list_logs(Some(&task_id), 10).await.unwrap();

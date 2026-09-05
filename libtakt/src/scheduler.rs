@@ -82,6 +82,12 @@ impl AppScheduler {
     }
 
     pub async fn load_all_tasks(&self) -> anyhow::Result<()> {
+        if let Err(error) = self.reconstitute_calendar_dispatches().await {
+            eprintln!(
+                "Warning: failed to reconstitute calendar dispatches: {}",
+                error
+            );
+        }
         let tasks = self.store.list_tasks().await?;
         for task in &tasks {
             if task.enabled {
@@ -114,9 +120,6 @@ impl AppScheduler {
         // Re-fetch from DB so catch-up sees tasks disabled by scheduling failures
         let tasks = self.store.list_tasks().await?;
         self.catch_up_missed(&tasks).await;
-        if let Err(e) = self.reconstitute_calendar_dispatches().await {
-            eprintln!("Warning: failed to reconstitute calendar dispatches: {}", e);
-        }
         Ok(())
     }
 
@@ -142,7 +145,7 @@ impl AppScheduler {
                     }
                 }
                 Schedule::DailyFirstUse { .. } => false, // has its own logic
-                Schedule::Calendar { .. } => false, // Phase 1 stub: never catches up; real logic lands in Phase 3
+                Schedule::Calendar { .. } => false, // Calendar recovery owns missed occurrences.
             };
 
             if should_catch_up {
@@ -311,7 +314,10 @@ impl AppScheduler {
         }
 
         // Delete any still-scheduled rows.
-        let _ = self.store.delete_scheduled_dispatches_for_task(task_id).await;
+        let _ = self
+            .store
+            .delete_scheduled_dispatches_for_task(task_id)
+            .await;
         Ok(())
     }
 
@@ -331,25 +337,40 @@ impl AppScheduler {
     }
 
     pub(crate) async fn reconstitute_calendar_dispatches(&self) -> anyhow::Result<()> {
+        let dispatcher = crate::calendar::CalendarPoller::new(
+            self.store.clone(),
+            self.executor.clone(),
+            self.bridge.clone(),
+            self.cancel_tokens.clone(),
+        );
         let pending = self.store.list_pending_dispatches().await?;
         for p in pending {
             // Validate the task still exists and is a Calendar schedule.
             let task = match self.store.get_task(&p.task_id).await? {
                 Some(t) if t.enabled => t,
                 _ => {
-                    let _ = self.store.delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start).await;
+                    let _ = self
+                        .store
+                        .delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start)
+                        .await;
                     continue;
                 }
             };
             if !matches!(task.schedule, Schedule::Calendar { .. }) {
-                let _ = self.store.delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start).await;
+                let _ = self
+                    .store
+                    .delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start)
+                    .await;
                 continue;
             }
 
             let trigger_at = match chrono::DateTime::parse_from_rfc3339(&p.trigger_at) {
                 Ok(dt) => dt.with_timezone(&chrono::Utc),
                 Err(_) => {
-                    let _ = self.store.delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start).await;
+                    let _ = self
+                        .store
+                        .delete_calendar_dispatch(&p.task_id, &p.event_id, &p.event_start)
+                        .await;
                     continue;
                 }
             };
@@ -359,50 +380,38 @@ impl AppScheduler {
             if d < 0 {
                 // Missed slot.
                 if task.run_if_missed {
-                    self.spawn_reconstituted_dispatch(task, p, 0).await;
+                    dispatcher
+                        .spawn_dispatch(p.task_id, p.event_id, p.event_start, 0)
+                        .await;
                 } else {
-                    let _ = self.store.mark_calendar_dispatch_dispatched(&p.task_id, &p.event_id, &p.event_start).await;
-                    let _ = self.store.log_execution(
-                        &p.task_id, "skipped", None, None, Some("startup reconstitute: slot missed; run_if_missed=false".to_string()),
-                    ).await;
+                    if !self
+                        .store
+                        .mark_calendar_dispatch_dispatched(&p.task_id, &p.event_id, &p.event_start)
+                        .await?
+                    {
+                        continue;
+                    }
+                    let _ = self
+                        .store
+                        .log_execution(
+                            &p.task_id,
+                            "skipped",
+                            None,
+                            None,
+                            Some(
+                                "startup reconstitute: slot missed; run_if_missed=false"
+                                    .to_string(),
+                            ),
+                        )
+                        .await;
                 }
             } else {
-                self.spawn_reconstituted_dispatch(task, p, d as u64).await;
+                dispatcher
+                    .spawn_dispatch(p.task_id, p.event_id, p.event_start, d as u64)
+                    .await;
             }
         }
         Ok(())
-    }
-
-    async fn spawn_reconstituted_dispatch(
-        &self,
-        _task: TaskDto,
-        p: crate::store::PendingDispatch,
-        delay_secs: u64,
-    ) {
-        let key = crate::calendar::dispatch_token_key(&p.task_id, &p.event_id, &p.event_start);
-        let token = tokio_util::sync::CancellationToken::new();
-        let child = token.child_token();
-        self.cancel_tokens.lock().await.insert(key.clone(), token);
-
-        let store = Arc::clone(&self.store);
-        let executor = Arc::clone(&self.executor);
-        let bridge = Arc::clone(&self.bridge);
-        let cancel_tokens = Arc::clone(&self.cancel_tokens);
-        let task_id = p.task_id.clone();
-        let event_id = p.event_id.clone();
-        let event_start = p.event_start.clone();
-
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = child.cancelled() => {
-                    cancel_tokens.lock().await.remove(&key);
-                    return;
-                }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs)) => {}
-            }
-            crate::calendar::run_dispatch_pub(store, executor, bridge, task_id, event_id, event_start).await;
-            cancel_tokens.lock().await.remove(&key);
-        });
     }
 }
 
@@ -437,7 +446,10 @@ pub(crate) async fn execute_and_log(
         send_run_notification(bridge, task_name, status == "success");
     }
     let stdout_with_trace = match (event, stdout.as_ref()) {
-        (Some(e), Some(s)) => Some(format!("Triggered by event: {} @ {}\n{}", e.title, e.start, s)),
+        (Some(e), Some(s)) => Some(format!(
+            "Triggered by event: {} @ {}\n{}",
+            e.title, e.start, s
+        )),
         (Some(e), None) => Some(format!("Triggered by event: {} @ {}", e.title, e.start)),
         (None, s) => s.cloned(),
     };

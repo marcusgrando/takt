@@ -20,15 +20,19 @@ pub trait PlatformBridge: Send + Sync {
     /// timing data must use `session_active = false` or no input timestamp.
     fn get_user_activity_snapshot(&self) -> crate::models::UserActivitySnapshot;
 
-    // ── Calendar methods (Phase 1: stubs; Phase 2: real EventKit impls) ──
+    // Calendar access and event queries are implemented by the native bridge.
 
     /// Returns the current user permission state for EventKit access.
     /// Callers MUST use this instead of inferring from `list_calendars()` output.
-    fn get_calendar_access_status(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError>;
+    fn get_calendar_access_status(
+        &self,
+    ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError>;
 
     /// Triggers the native permission prompt (user-gated via an explicit button click).
     /// Returns the resulting status after the prompt closes.
-    fn request_calendar_access(&self) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError>;
+    fn request_calendar_access(
+        &self,
+    ) -> Result<crate::models::CalendarAccessStatus, crate::error::TaktError>;
 
     /// Lists calendars the user can select as trigger sources.
     /// Returns `Err(TaktError::Execution { msg: "calendar_access_denied" })` if access is not granted.
