@@ -9,6 +9,15 @@ mod tests {
 
     struct MockBridge;
 
+    #[test]
+    fn shortcut_steps_remain_valid() {
+        let core = TaktCore::new(Arc::new(MockBridge));
+        for expression in ["5/5 * * * *", "0 5/5 * * * *"] {
+            assert!(core.validate_cron(expression.to_string()).is_ok());
+        }
+        assert!(core.validate_cron("*/0 * * * *".to_string()).is_err());
+    }
+
     impl PlatformBridge for MockBridge {
         fn send_notification(&self, _title: String, _body: String, _sound: bool) {}
         fn run_on_main_sync(&self, callback_id: u64) {

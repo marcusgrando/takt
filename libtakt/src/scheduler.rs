@@ -12,6 +12,23 @@ use uuid::Uuid;
 
 mod daily_first_use;
 
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn shortcut_steps_retain_next_fire_time() {
+        assert!(next_cron_fire("5/5 * * * *").is_some());
+        assert!(next_cron_fire("0 5/5 * * * *").is_some());
+    }
+
+    #[test]
+    fn shortcut_steps_retain_missed_run_detection() {
+        let last_run = (Local::now() - chrono::Duration::hours(2)).to_rfc3339();
+        assert!(missed_cron_run("5/5 * * * *", Some(&last_run)));
+    }
+}
+
 pub(crate) fn normalize_cron(expr: &str) -> String {
     let expr = expr.trim();
     let parts: Vec<&str> = expr.split_whitespace().collect();
@@ -20,6 +37,15 @@ pub(crate) fn normalize_cron(expr: &str) -> String {
     } else {
         expr.to_string()
     }
+}
+
+pub(crate) fn parse_cron(expression: &str) -> Result<croner::Cron, croner::errors::CronError> {
+    croner::parser::CronParser::builder()
+        .seconds(croner::parser::Seconds::Optional)
+        // Preserve shortcut steps accepted by existing tasks and the scheduler.
+        .sloppy_ranges(true)
+        .build()
+        .parse(expression.trim())
 }
 
 /// Check if a cron task missed an execution while the system was asleep/off.
@@ -33,8 +59,7 @@ fn missed_cron_run(expression: &str, last_run_at: Option<&str>) -> bool {
         None => return false, // never ran — not a missed execution, just new
     };
 
-    let expr = normalize_cron(expression);
-    let cron: croner::Cron = match expr.parse() {
+    let cron = match parse_cron(expression) {
         Ok(c) => c,
         Err(_) => return false,
     };
@@ -417,8 +442,7 @@ impl AppScheduler {
 
 /// Compute the next fire time for a cron expression from now.
 fn next_cron_fire(expression: &str) -> Option<String> {
-    let expr = normalize_cron(expression);
-    let cron: croner::Cron = expr.parse().ok()?;
+    let cron = parse_cron(expression).ok()?;
     let next = cron.find_next_occurrence(&Local::now(), false).ok()?;
     Some(next.to_rfc3339())
 }
