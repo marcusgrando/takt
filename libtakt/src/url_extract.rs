@@ -80,12 +80,12 @@ pub fn collect_event_urls(
 ) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     if let Some(conf) = conference_url {
-        seen.insert(conf.to_string());
+        seen.insert(dedup_key(conf));
     }
     let mut out = Vec::new();
     for text in [notes, location].into_iter().flatten() {
         for url in extract_urls_from_text(text) {
-            if seen.insert(url.clone()) {
+            if seen.insert(dedup_key(&url)) {
                 out.push(url);
             }
         }
@@ -93,9 +93,21 @@ pub fn collect_event_urls(
     out
 }
 
+/// Key for treating URL variants as the same link: case-insensitive, no query
+/// string, no trailing punctuation or slash. Invites (notably Teams) repeat the
+/// same meeting link with different casing, percent-encoding case, or context
+/// params. The Swift conference detector also keeps trailing chars this trims.
+/// ponytail: dropping the query is a heuristic, refine per provider if it ever
+/// collapses two distinct links.
+pub fn dedup_key(url: &str) -> String {
+    let no_query = url.split(['?', '#']).next().unwrap_or(url);
+    trim_trailing_punctuation(no_query)
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
 fn trim_trailing_punctuation(s: &str) -> &str {
-    let trimmed = s.trim_end_matches(['.', ',', ';', ':', '!', '?']);
-    trimmed
+    s.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '>'])
 }
 
 #[cfg(test)]
@@ -156,6 +168,16 @@ mod tests {
             None,
         );
         assert_eq!(urls, vec!["https://a.test", "https://maps.test/room42"]);
+    }
+
+    #[test]
+    fn collect_event_urls_dedupes_teams_variants() {
+        let conf = "https://teams.microsoft.com/l/meetup-join/19%3Ameeting_abc%40thread.v2/0?context=%7B%22Tid%22%7D)";
+        let notes = "Join: https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%7d\n\
+                     Web: <https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0>";
+        let location = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0/";
+        let urls = collect_event_urls(Some(notes), Some(location), Some(conf));
+        assert!(urls.is_empty(), "got {urls:?}");
     }
 
     #[test]

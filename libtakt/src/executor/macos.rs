@@ -133,11 +133,15 @@ impl ActionExecutor for MacosExecutor {
                         event.location.as_deref(),
                         event.conference_url.as_deref(),
                     );
-                    for url in extracted {
-                        if !urls.contains(&url) {
-                            urls.push(url);
-                        }
-                    }
+                    let seen: std::collections::HashSet<_> = urls
+                        .iter()
+                        .map(|u| crate::url_extract::dedup_key(u))
+                        .collect();
+                    urls.extend(
+                        extracted
+                            .into_iter()
+                            .filter(|u| !seen.contains(&crate::url_extract::dedup_key(u))),
+                    );
                 }
 
                 if urls.is_empty() {
