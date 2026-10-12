@@ -16,6 +16,10 @@ pub const CALENDAR_POLL_INTERVAL_SECS: u64 = 300;
 pub const CALENDAR_LOOKAHEAD_MARGIN_SECS: u64 = 60;
 pub const CALENDAR_LOOKBACK_MARGIN_SECS: u64 = 60;
 pub const DISPATCH_TOLERANCE_SECS: i64 = 2;
+/// Longest gap since the last complete poll that is still caught up after
+/// sleep. Bounds the EventKit query after long downtime. Dispatch markers are
+/// retained for twice this long.
+pub const CALENDAR_MAX_CATCH_UP_SECS: i64 = 24 * 60 * 60;
 
 /// Key format for tokens parking in `AppScheduler::cancel_tokens`:
 /// `calendar:{task_id}:{event_id}:{event_start}`
@@ -39,6 +43,13 @@ pub struct CalendarPoller {
     executor: Arc<dyn ActionExecutor>,
     bridge: Arc<dyn PlatformBridge>,
     cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// Start time of the last poll that fetched every calendar. Events that
+    /// started after it (minus the lookback margin) are new slots, so a poll
+    /// after system sleep still catches up on the gap.
+    last_complete_tick: Mutex<Option<DateTime<Utc>>>,
+    /// Watermark used until the first complete poll, so failed startup polls
+    /// do not move the cutoff forward.
+    created_at: DateTime<Utc>,
 }
 
 impl CalendarPoller {
@@ -53,6 +64,8 @@ impl CalendarPoller {
             executor,
             bridge,
             cancel_tokens,
+            last_complete_tick: Mutex::new(None),
+            created_at: Utc::now(),
         }
     }
 
@@ -74,15 +87,35 @@ impl CalendarPoller {
     }
 
     async fn tick(&self) -> anyhow::Result<()> {
+        let tick_started = Utc::now();
         let tasks = self.store.list_tasks().await?;
         let calendar_tasks: Vec<TaskDto> = tasks
             .into_iter()
             .filter(|t| t.enabled && matches!(t.schedule, Schedule::Calendar { .. }))
             .collect();
         if calendar_tasks.is_empty() {
+            *self.last_complete_tick.lock().await = Some(tick_started);
             let _ = self.store.prune_old_calendar_dispatches().await;
             return Ok(());
         }
+
+        // EventKit returns every event overlapping the window, including ones
+        // that started long ago (in-progress, all-day, multi-day). Only events
+        // starting after the last complete poll are new slots.
+        let since = self
+            .last_complete_tick
+            .lock()
+            .await
+            .unwrap_or(self.created_at)
+            .min(tick_started);
+        let new_slot_cutoff = (since
+            - Duration::seconds(
+                (CALENDAR_POLL_INTERVAL_SECS + CALENDAR_LOOKBACK_MARGIN_SECS) as i64,
+            ))
+        .max(tick_started - Duration::seconds(CALENDAR_MAX_CATCH_UP_SECS));
+        // Only a tick that fetched and reserved everything may advance the
+        // watermark, otherwise a failed slot would never be retried.
+        let mut tick_complete = true;
 
         // Group by calendar_id to minimize bridge calls.
         let mut by_calendar: HashMap<String, Vec<TaskDto>> = HashMap::new();
@@ -105,8 +138,7 @@ impl CalendarPoller {
                 .max()
                 .unwrap_or(0)
                 + (CALENDAR_POLL_INTERVAL_SECS + CALENDAR_LOOKAHEAD_MARGIN_SECS) / 60;
-            let lookback_minutes =
-                (CALENDAR_POLL_INTERVAL_SECS + CALENDAR_LOOKBACK_MARGIN_SECS) / 60;
+            let lookback_minutes = ((tick_started - new_slot_cutoff).num_seconds() + 59) / 60;
 
             let events = match self.bridge.fetch_events_in_window(
                 calendar_id.clone(),
@@ -116,6 +148,7 @@ impl CalendarPoller {
                 Ok(list) => list,
                 Err(e) => {
                     eprintln!("[takt] fetch_events_in_window({}): {}", calendar_id, e);
+                    tick_complete = false;
                     continue;
                 }
             };
@@ -135,7 +168,11 @@ impl CalendarPoller {
                             continue;
                         }
                     }
-                    if let Err(error) = self.process_slot(task, event, minutes_before).await {
+                    if let Err(error) = self
+                        .process_slot(task, event, minutes_before, new_slot_cutoff)
+                        .await
+                    {
+                        tick_complete = false;
                         eprintln!(
                             "[takt] reserve calendar dispatch for {}: {}",
                             task.id, error
@@ -145,6 +182,9 @@ impl CalendarPoller {
             }
         }
 
+        if tick_complete {
+            *self.last_complete_tick.lock().await = Some(tick_started);
+        }
         let _ = self.store.prune_old_calendar_dispatches().await;
         Ok(())
     }
@@ -154,6 +194,7 @@ impl CalendarPoller {
         task: &TaskDto,
         event: &CalendarEvent,
         minutes_before: u32,
+        new_slot_cutoff: DateTime<Utc>,
     ) -> anyhow::Result<()> {
         let event_start = match DateTime::parse_from_rfc3339(&event.start) {
             Ok(dt) => dt.with_timezone(&Utc),
@@ -162,6 +203,10 @@ impl CalendarPoller {
         let trigger_at = event_start - Duration::minutes(minutes_before as i64);
         let now = Utc::now();
         let d = (trigger_at - now).num_seconds();
+
+        if event_start < new_slot_cutoff {
+            return Ok(());
+        }
 
         // Skip if already known.
         if self
@@ -314,6 +359,38 @@ async fn claim_dispatch(
         Ok(claimed) => claimed,
         Err(error) => {
             eprintln!("[takt] claim calendar dispatch for {}: {}", task_id, error);
+            false
+        }
+    }
+}
+
+/// Claims a rescheduled event under both its reserved and its new start, so
+/// the next poll does not dispatch the same occurrence again. On a storage
+/// error nothing is claimed and the reservation stays retryable.
+async fn claim_moved_dispatch(
+    store: &TaskStore,
+    task_id: &str,
+    event_id: &str,
+    reserved_start: &str,
+    moved_start: &str,
+    trigger_at: &DateTime<Utc>,
+) -> bool {
+    match store
+        .claim_moved_calendar_dispatch(
+            task_id,
+            event_id,
+            reserved_start,
+            moved_start,
+            &trigger_at.to_rfc3339(),
+        )
+        .await
+    {
+        Ok(claimed) => claimed,
+        Err(error) => {
+            eprintln!(
+                "[takt] claim moved calendar dispatch for {}: {}",
+                task_id, error
+            );
             false
         }
     }
@@ -505,7 +582,20 @@ async fn run_dispatch(
     if cancellation.is_cancelled() {
         return;
     }
-    if !claim_dispatch(&store, &task_id, &event_id, &event_start).await {
+    let claimed = if fresh.start == event_start {
+        claim_dispatch(&store, &task_id, &event_id, &event_start).await
+    } else {
+        claim_moved_dispatch(
+            &store,
+            &task_id,
+            &event_id,
+            &event_start,
+            &fresh.start,
+            &new_trigger_at,
+        )
+        .await
+    };
+    if !claimed {
         return;
     }
 

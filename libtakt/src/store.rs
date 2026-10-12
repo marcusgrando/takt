@@ -8,6 +8,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Execution logs kept per task. Each row can hold up to 2 MiB of output, so
+/// unbounded history would grow the database forever. The history view reads
+/// at most 500 rows.
+const MAX_LOGS_PER_TASK: i64 = 500;
+
 /// A calendar dispatch row that has status = 'scheduled' and is waiting to fire.
 #[derive(Debug, Clone)]
 pub struct PendingDispatch {
@@ -77,10 +82,18 @@ impl TaskStore {
         let rows: Vec<Task> = sqlx::query_as("SELECT * FROM tasks ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await?;
+        // A single unreadable row (e.g. written by a newer build) must not hide
+        // or unschedule every other task.
         let mut dtos: Vec<TaskDto> = rows
             .iter()
-            .map(|t| t.to_dto().map_err(|e| anyhow::anyhow!(e)))
-            .collect::<anyhow::Result<_>>()?;
+            .filter_map(|t| match t.to_dto() {
+                Ok(dto) => Some(dto),
+                Err(error) => {
+                    eprintln!("[takt] skipping unreadable task {}: {}", t.id, error);
+                    None
+                }
+            })
+            .collect();
         self.populate_health(&mut dtos);
         Ok(dtos)
     }
@@ -225,6 +238,16 @@ impl TaskStore {
         .bind(error)
         .execute(&self.pool)
         .await?;
+        sqlx::query(
+            "DELETE FROM execution_logs WHERE task_id = ? AND id NOT IN (
+                 SELECT id FROM execution_logs WHERE task_id = ?
+                 ORDER BY started_at DESC LIMIT ?)",
+        )
+        .bind(task_id)
+        .bind(task_id)
+        .bind(MAX_LOGS_PER_TASK)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -362,12 +385,93 @@ impl TaskStore {
 
     /// Delete all rows whose `event_start` is more than 24 hours in the past.
     pub async fn prune_old_calendar_dispatches(&self) -> anyhow::Result<()> {
-        let cutoff = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
-        sqlx::query("DELETE FROM calendar_dispatches WHERE event_start < ?")
-            .bind(&cutoff)
-            .execute(&self.pool)
-            .await?;
+        // Markers must outlive the poller's catch-up horizon or a consumed slot
+        // becomes eligible again, and must stay while a pending reservation of
+        // the same event can still be recovered (a moved event has two keys).
+        // Pending rows are kept for restart recovery until they are a week old.
+        let now = chrono::Utc::now();
+        let marker_cutoff = (now
+            - chrono::Duration::seconds(2 * crate::calendar::CALENDAR_MAX_CATCH_UP_SECS))
+        .to_rfc3339();
+        let pending_cutoff = (now - chrono::Duration::days(7)).to_rfc3339();
+        sqlx::query(
+            "DELETE FROM calendar_dispatches
+             WHERE status = 'scheduled' AND event_start < ?",
+        )
+        .bind(&pending_cutoff)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM calendar_dispatches
+             WHERE status = 'dispatched' AND event_start < ?
+               AND NOT EXISTS (
+                   SELECT 1 FROM calendar_dispatches AS pending
+                   WHERE pending.task_id = calendar_dispatches.task_id
+                     AND pending.event_id = calendar_dispatches.event_id
+                     AND pending.status = 'scheduled')",
+        )
+        .bind(&marker_cutoff)
+        .execute(&self.pool)
+        .await?;
         Ok(())
+    }
+
+    /// Atomically claims a reserved slot whose event moved to `moved_start`,
+    /// and marks the moved slot dispatched too. Returns false when the caller
+    /// must not execute: either the reserved slot was already claimed (no
+    /// change), or the moved slot already ran (the reserved slot is consumed so
+    /// restart recovery cannot replay it).
+    pub async fn claim_moved_calendar_dispatch(
+        &self,
+        task_id: &str,
+        event_id: &str,
+        reserved_start: &str,
+        moved_start: &str,
+        moved_trigger_at: &str,
+    ) -> anyhow::Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self.pool.begin().await?;
+        let claim = "UPDATE calendar_dispatches
+             SET status = 'dispatched', dispatched_at = ?
+             WHERE task_id = ? AND event_id = ? AND event_start = ? AND status = 'scheduled'";
+        let reserved = sqlx::query(claim)
+            .bind(&now)
+            .bind(task_id)
+            .bind(event_id)
+            .bind(reserved_start)
+            .execute(&mut *tx)
+            .await?;
+        if reserved.rows_affected() != 1 {
+            return Ok(false);
+        }
+        let inserted = sqlx::query(
+            "INSERT OR IGNORE INTO calendar_dispatches
+             (task_id, event_id, event_start, status, trigger_at, reserved_at, dispatched_at)
+             VALUES (?, ?, ?, 'dispatched', ?, ?, ?)",
+        )
+        .bind(task_id)
+        .bind(event_id)
+        .bind(moved_start)
+        .bind(moved_trigger_at)
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+        if inserted.rows_affected() != 1 {
+            let moved = sqlx::query(claim)
+                .bind(&now)
+                .bind(task_id)
+                .bind(event_id)
+                .bind(moved_start)
+                .execute(&mut *tx)
+                .await?;
+            if moved.rows_affected() != 1 {
+                tx.commit().await?;
+                return Ok(false);
+            }
+        }
+        tx.commit().await?;
+        Ok(true)
     }
 
     /// Return all rows whose status is 'scheduled', in trigger_at order.
@@ -574,6 +678,89 @@ mod tests {
         assert_eq!(logs[0].status, "success");
     }
 
+    #[tokio::test]
+    async fn log_execution_keeps_only_recent_rows_per_task() {
+        let store = test_store().await;
+        let mut task_ids = Vec::new();
+        for name in ["Busy", "Quiet"] {
+            let task = store
+                .create_task(
+                    name.to_string(),
+                    None,
+                    true,
+                    false,
+                    Schedule::DailyFirstUse { delay_minutes: 5 },
+                    Action::Notify {
+                        title: "Hi".to_string(),
+                        body: "World".to_string(),
+                        sound: false,
+                    },
+                )
+                .await
+                .unwrap();
+            task_ids.push(task.id);
+        }
+        let (busy, quiet) = (&task_ids[0], &task_ids[1]);
+        for _ in 0..MAX_LOGS_PER_TASK + 3 {
+            store
+                .log_execution(busy, "success", None, None, None)
+                .await
+                .unwrap();
+        }
+        store
+            .log_execution(quiet, "success", None, None, None)
+            .await
+            .unwrap();
+
+        let busy_logs = store.list_logs(Some(busy), 1_000).await.unwrap();
+        assert_eq!(busy_logs.len(), MAX_LOGS_PER_TASK as usize);
+        assert_eq!(store.list_logs(Some(quiet), 10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_skips_unreadable_rows() {
+        let store = test_store().await;
+        store
+            .create_task(
+                "Readable".to_string(),
+                None,
+                true,
+                false,
+                Schedule::DailyFirstUse { delay_minutes: 5 },
+                Action::Notify {
+                    title: "Hi".to_string(),
+                    body: "World".to_string(),
+                    sound: false,
+                },
+            )
+            .await
+            .unwrap();
+        let broken = store
+            .create_task(
+                "Broken".to_string(),
+                None,
+                true,
+                false,
+                Schedule::DailyFirstUse { delay_minutes: 5 },
+                Action::Notify {
+                    title: "Hi".to_string(),
+                    body: "World".to_string(),
+                    sound: false,
+                },
+            )
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tasks SET schedule_json = '{\"type\":\"FromTheFuture\"}' WHERE id = ?")
+            .bind(&broken.id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let tasks = store.list_tasks().await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].name, "Readable");
+    }
+
     // ── calendar_dispatches tests ─────────────────────────────────────────────
 
     #[tokio::test]
@@ -764,6 +951,55 @@ mod tests {
             .dispatch_exists("t2", "e4", "2026-05-01T11:00:00Z")
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn prune_keeps_recent_pending_rows_and_dispatch_markers() {
+        let store = test_store().await;
+        let old = &(chrono::Utc::now() - chrono::Duration::days(3)).to_rfc3339();
+        let recent = (chrono::Utc::now() - chrono::Duration::hours(30)).to_rfc3339();
+        store
+            .insert_calendar_dispatch("t1", "pending", old, "scheduled", old)
+            .await
+            .unwrap();
+        store
+            .insert_calendar_dispatch("t1", "recent", &recent, "dispatched", &recent)
+            .await
+            .unwrap();
+
+        store.prune_old_calendar_dispatches().await.unwrap();
+
+        assert!(store.dispatch_exists("t1", "pending", old).await.unwrap());
+        assert!(store
+            .dispatch_exists("t1", "recent", &recent)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn prune_keeps_markers_of_events_with_pending_reservations() {
+        let store = test_store().await;
+        let reserved = (chrono::Utc::now() - chrono::Duration::days(3)).to_rfc3339();
+        let moved = (chrono::Utc::now() - chrono::Duration::days(3) - chrono::Duration::hours(1))
+            .to_rfc3339();
+        let ancient = (chrono::Utc::now() - chrono::Duration::days(8)).to_rfc3339();
+        store
+            .insert_calendar_dispatch("t1", "e1", &reserved, "scheduled", &reserved)
+            .await
+            .unwrap();
+        store
+            .insert_calendar_dispatch("t1", "e1", &moved, "dispatched", &moved)
+            .await
+            .unwrap();
+        store
+            .insert_calendar_dispatch("t1", "e2", &ancient, "scheduled", &ancient)
+            .await
+            .unwrap();
+
+        store.prune_old_calendar_dispatches().await.unwrap();
+
+        assert!(store.dispatch_exists("t1", "e1", &moved).await.unwrap());
+        assert!(!store.dispatch_exists("t1", "e2", &ancient).await.unwrap());
     }
 
     #[tokio::test]

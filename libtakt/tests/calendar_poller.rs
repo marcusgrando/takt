@@ -39,6 +39,69 @@ async fn concurrent_dispatches_execute_reserved_occurrence_once() {
 }
 
 #[tokio::test]
+async fn moved_event_claims_new_start_so_it_runs_once() {
+    let original_start = (chrono::Utc::now() - chrono::Duration::minutes(3)).to_rfc3339();
+    let moved_start = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
+    let bridge =
+        MockBridge::new().with_event_instance(sample_event("e", "cal", &moved_start, "Meeting"));
+    let store = make_store(bridge.clone()).await;
+    let task = create_calendar_task(&store, "cal", true).await;
+    store
+        .insert_calendar_dispatch(&task, "e", &original_start, "scheduled", &original_start)
+        .await
+        .unwrap();
+    // The poller reserved the moved start before the original dispatch fired.
+    store
+        .insert_calendar_dispatch(&task, "e", &moved_start, "scheduled", &moved_start)
+        .await
+        .unwrap();
+    let executor = Arc::new(SpyExecutor::default());
+    for start in [&original_start, &moved_start] {
+        calendar::run_dispatch_pub(
+            store.clone(),
+            executor.clone(),
+            bridge.clone(),
+            task.clone(),
+            "e".into(),
+            start.clone(),
+        )
+        .await;
+    }
+    assert_eq!(executor.calls.lock().unwrap().len(), 1);
+    assert!(store.list_pending_dispatches().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn moved_claim_consumes_reservation_when_moved_slot_already_ran() {
+    let bridge = MockBridge::new();
+    let store = make_store(bridge).await;
+    let task = create_calendar_task(&store, "cal", true).await;
+    let (reserved, moved) = ("2026-05-01T10:00:00Z", "2026-05-01T10:30:00Z");
+    store
+        .insert_calendar_dispatch(&task, "e", reserved, "scheduled", reserved)
+        .await
+        .unwrap();
+    store
+        .insert_calendar_dispatch(&task, "e", moved, "dispatched", moved)
+        .await
+        .unwrap();
+
+    let claimed = store
+        .claim_moved_calendar_dispatch(&task, "e", reserved, moved, moved)
+        .await
+        .unwrap();
+
+    assert!(
+        !claimed,
+        "the moved slot already ran, so this dispatch must not"
+    );
+    assert!(
+        store.list_pending_dispatches().await.unwrap().is_empty(),
+        "the reserved slot is consumed so recovery cannot replay it"
+    );
+}
+
+#[tokio::test]
 async fn dispatch_without_reservation_never_executes() {
     let start = chrono::Utc::now().to_rfc3339();
     let bridge = MockBridge::new().with_event_instance(sample_event("e", "cal", &start, "Meeting"));
