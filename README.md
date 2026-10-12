@@ -87,4 +87,4 @@ Release PRs are opened with the default `GITHUB_TOKEN`, so the repository settin
 
 ## License
 
-Private — all rights reserved.
+[MIT](LICENSE)
