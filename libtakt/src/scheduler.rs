@@ -22,6 +22,14 @@ mod compatibility_tests {
         assert!(next_cron_fire("0 5/5 * * * *").is_some());
     }
 
+    #[tokio::test]
+    async fn wall_clock_sleep_returns_for_past_and_near_deadlines() {
+        sleep_until_wall_clock(Local::now() - chrono::Duration::seconds(5)).await;
+        let started = std::time::Instant::now();
+        sleep_until_wall_clock(Local::now() + chrono::Duration::milliseconds(50)).await;
+        assert!(started.elapsed() >= std::time::Duration::from_millis(40));
+    }
+
     #[test]
     fn shortcut_steps_retain_missed_run_detection() {
         let last_run = (Local::now() - chrono::Duration::hours(2)).to_rfc3339();
@@ -69,6 +77,19 @@ fn missed_cron_run(expression: &str, last_run_at: Option<&str>) -> bool {
         next < Local::now()
     } else {
         false
+    }
+}
+
+/// Sleeps until the wall-clock `deadline`. tokio timers run on a monotonic
+/// clock that stops while macOS sleeps, so a single long sleep would fire late
+/// after wake. Short chunks re-check the wall clock instead.
+async fn sleep_until_wall_clock(deadline: DateTime<Local>) {
+    const MAX_CHUNK: std::time::Duration = std::time::Duration::from_secs(30);
+    while let Ok(remaining) = (deadline - Local::now()).to_std() {
+        if remaining.is_zero() {
+            break;
+        }
+        tokio::time::sleep(remaining.min(MAX_CHUNK)).await;
     }
 }
 
@@ -245,7 +266,6 @@ impl AppScheduler {
                     .with_timezone(&Local);
                 let now = Local::now();
                 if run_at > now {
-                    let delay = (run_at - now).to_std()?;
                     let token = CancellationToken::new();
                     let child_token = token.child_token();
                     let tokens = Arc::clone(&self.cancel_tokens);
@@ -253,7 +273,7 @@ impl AppScheduler {
                     tokio::spawn(async move {
                         tokio::select! {
                             _ = child_token.cancelled() => return,
-                            _ = tokio::time::sleep(delay) => {}
+                            _ = sleep_until_wall_clock(run_at) => {}
                         }
                         match store.get_task(&task_id).await {
                             Ok(Some(t)) if t.enabled => { /* proceed */ }

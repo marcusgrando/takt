@@ -344,9 +344,18 @@ async fn run_with_date_source(
         if cancel.is_cancelled() {
             return;
         }
-        let task = match store.get_task(&task_id).await {
-            Ok(task) => task,
-            Err(_) => return,
+        // A transient DB error must not stop this task or restart its delay.
+        let task = loop {
+            match store.get_task(&task_id).await {
+                Ok(task) => break task,
+                Err(error) => {
+                    eprintln!("[takt] daily first use: load task {}: {}", task_id, error);
+                    tokio::select! {
+                        _ = cancel.cancelled() => return,
+                        _ = tokio::time::sleep(date_wait_poll_interval) => {}
+                    }
+                }
+            }
         };
         let execution_date = local_date();
         if task_is_executable_on_local_date(task.as_ref(), ready_date, execution_date) {
