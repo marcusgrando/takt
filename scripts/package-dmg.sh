@@ -34,6 +34,9 @@ DMG_PATH="$BUILD_DIR/$APP_NAME-$VERSION-arm64.dmg"
 APP_PATH="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 
 echo "==> Building $APP_NAME $VERSION ($BUILD_NUMBER)..."
+# Xcode collects the synchronized source folder before its build phases run,
+# so the generated Swift bindings must exist before xcodebuild starts.
+"$REPO_ROOT/scripts/build-rust.sh" release
 xcodebuild \
     -project "$REPO_ROOT/macos/Takt.xcodeproj" \
     -scheme "$APP_NAME" \

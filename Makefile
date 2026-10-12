@@ -27,6 +27,7 @@ test-swift: ## Run standalone Swift regression tests
 
 .PHONY: build-ci
 build-ci: ## Build the arm64 macOS app without code signing
+	./scripts/build-rust.sh debug
 	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug -derivedDataPath "$(BUILD_DIR)" -destination 'generic/platform=macOS' ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
 
 .PHONY: build-rust
@@ -34,7 +35,7 @@ build-rust: ## Build Rust static lib + generate Swift bindings
 	./scripts/build-rust.sh release
 
 .PHONY: build
-build: ## Build the app via Xcode (Release) → build/Takt.app
+build: build-rust ## Build the app via Xcode (Release) → build/Takt.app
 	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Release -derivedDataPath "$(BUILD_DIR)" build
 
 .PHONY: dmg
@@ -43,6 +44,7 @@ dmg: ## Build the Release app and package build/Takt-<version>-arm64.dmg
 
 .PHONY: build-debug
 build-debug: ## Build the app via Xcode (Debug) → build/Takt.app
+	./scripts/build-rust.sh debug
 	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug -derivedDataPath "$(BUILD_DIR)" build
 
 # ─── Code Quality ──────────────────────────────────────────────────────────
