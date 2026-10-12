@@ -32,3 +32,6 @@ jobs:
 
       - name: macOS arm64 build
         run: make build-ci
+
+      - name: macOS Release DMG build
+        run: make dmg

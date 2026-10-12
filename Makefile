@@ -37,6 +37,10 @@ build-rust: ## Build Rust static lib + generate Swift bindings
 build: ## Build the app via Xcode (Release) → build/Takt.app
 	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Release -derivedDataPath "$(BUILD_DIR)" build
 
+.PHONY: dmg
+dmg: ## Build the Release app and package build/Takt-<version>-arm64.dmg
+	./scripts/package-dmg.sh
+
 .PHONY: build-debug
 build-debug: ## Build the app via Xcode (Debug) → build/Takt.app
 	cd macos && xcodebuild -project Takt.xcodeproj -scheme Takt -configuration Debug -derivedDataPath "$(BUILD_DIR)" build

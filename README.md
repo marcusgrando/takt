@@ -67,8 +67,23 @@ open macos/Takt.xcodeproj   # Cmd+R in Xcode
 ## Build
 
 ```bash
-xcodebuild -project macos/Takt.xcodeproj -scheme Takt -configuration Release build
+make build   # Release app in build/Build/Products/Release/Takt.app
+make dmg     # Ad-hoc signed build/Takt-<version>-arm64.dmg
 ```
+
+## Releases
+
+Releases are managed by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`:
+
+1. Each push to `main` updates a release PR with the next version and `CHANGELOG.md`. The version lives in `macos/Version.xcconfig`, `libtakt/Cargo.toml` and `Cargo.lock`.
+2. Merging the release PR creates the `vX.Y.Z` tag and GitHub release.
+3. The same workflow builds `Takt-X.Y.Z-arm64.dmg` with its `.sha256` and uploads both to the release.
+
+To rebuild the DMG for an existing tag, run the `Release` workflow manually with the tag as input.
+
+The DMG is ad-hoc signed, not notarized. On first launch, approve Takt in System Settings > Privacy & Security.
+
+Release PRs are opened with the default `GITHUB_TOKEN`, so the repository setting "Allow GitHub Actions to create and approve pull requests" must be enabled. GitHub does not trigger CI on PRs opened by that token. Release PRs only change version strings and `CHANGELOG.md`, and the release job runs the Rust tests before building the DMG.
 
 ## License
 
