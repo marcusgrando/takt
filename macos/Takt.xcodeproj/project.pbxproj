@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		AABB00112F85400000000002 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		9F4930E02F85373F00365EBB /* Takt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Takt.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -32,6 +33,7 @@
 		9F4930D72F85373E00365EBB = {
 			isa = PBXGroup;
 			children = (
+				AABB00112F85400000000002 /* Version.xcconfig */,
 				9F4930E22F85373F00365EBB /* Takt */,
 				9F4930E12F85373F00365EBB /* Products */,
 			);
@@ -267,14 +269,15 @@
 		};
 		9F4930EC2F85374100365EBB /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABB00112F85400000000002 /* Version.xcconfig */;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Takt/Takt.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MY427949GW;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -288,7 +291,6 @@
 					"@executable_path/../Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../target/aarch64-apple-darwin/debug";
-				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-llibtakt",
 					"-lsqlite3",
@@ -313,14 +315,15 @@
 		};
 		9F4930ED2F85374100365EBB /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AABB00112F85400000000002 /* Version.xcconfig */;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Takt/Takt.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MY427949GW;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -334,7 +337,6 @@
 					"@executable_path/../Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../target/aarch64-apple-darwin/release";
-				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"-llibtakt",
 					"-lsqlite3",

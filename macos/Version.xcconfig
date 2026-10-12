@@ -1,0 +1,4 @@
+// App version shared by every build configuration.
+// MARKETING_VERSION is bumped by release-please. Do not edit it by hand.
+MARKETING_VERSION = 0.1.0 // x-release-please-version
+CURRENT_PROJECT_VERSION = 1
