@@ -35,8 +35,5 @@ objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplicat
 block2 = "0.6"
 core-graphics = "0.25"
 
-[build-dependencies]
-uniffi = { version = "0.32", features = ["build"] }
-
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
