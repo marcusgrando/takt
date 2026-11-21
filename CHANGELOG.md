@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/marcusgrando/takt/compare/v0.2.0...v0.2.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **deps:** ship SQLite and TLS security updates ([4cad7ba](https://github.com/marcusgrando/takt/commit/4cad7baa56be5b71e96cd204f203129d3606e516))
+
 ## [0.2.0](https://github.com/marcusgrando/takt/compare/v0.1.0...v0.2.0) (2026-10-12)
 
 
